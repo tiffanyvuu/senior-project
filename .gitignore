@@ -1,0 +1,25 @@
+# OS / editor
+.DS_Store
+.vscode/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Python test/cache
+.pytest_cache/
+
+# React / Node frontend
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
