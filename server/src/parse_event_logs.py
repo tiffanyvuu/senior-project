@@ -9,9 +9,6 @@ from psycopg.types.json import Json
 from db import get_conn
 
 
-SOURCE = "sample.json"
-
-
 def parse_iso_timestamp(value: Any) -> str | None:
     if value is None:
         return None
@@ -51,11 +48,25 @@ def require_non_null(record_id: Any, field_name: str, value: Any) -> Any:
     return value
 
 
-def build_parsed_event(raw_record: dict[str, Any]) -> dict[str, Any]:
-    record_id = raw_record.get("id")
-    payload = parse_json_string(raw_record.get("content"))
+def extract_payload(raw_record: dict[str, Any]) -> dict[str, Any]:
+    # Prefer wrapped raw payloads from ingest pipelines, but allow direct event objects too.
+    wrapped_payload = raw_record.get("raw_message")
+    if wrapped_payload is None:
+        wrapped_payload = raw_record.get("content")
+
+    if wrapped_payload is None:
+        payload = raw_record
+    else:
+        payload = parse_json_string(wrapped_payload)
+
     if not isinstance(payload, dict):
-        raise ValueError(f"Record {record_id} has invalid content JSON")
+        raise ValueError(f"Record {raw_record.get('id')} has invalid payload JSON")
+    return payload
+
+
+def build_parsed_event(raw_record: dict[str, Any], source: str) -> dict[str, Any]:
+    record_id = raw_record.get("id")
+    payload = extract_payload(raw_record)
 
     session_id = require_non_null(record_id, "sessionID", payload.get("sessionID"))
     student_id = require_non_null(record_id, "studentID", payload.get("studentID"))
@@ -75,14 +86,35 @@ def build_parsed_event(raw_record: dict[str, Any]) -> dict[str, Any]:
         "has_orphans": payload.get("hasOrphans"),
         "switch_block_count": payload.get("switchBlockCount"),
         "error_message": payload.get("errorMessage"),
-        "source": SOURCE,
+        "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def parse_file(input_path: Path) -> list[dict[str, Any]]:
+    source = input_path.name
+    suffix = input_path.suffix.lower()
+
+    if suffix in {".ndjson", ".jsonl"}:
+        records: list[dict[str, Any]] = []
+        with input_path.open("r", encoding="utf-8") as fh:
+            for line_number, line in enumerate(fh, start=1):
+                text = line.strip()
+                if not text:
+                    continue
+                try:
+                    row = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Invalid NDJSON at line {line_number}: {exc}") from exc
+                if not isinstance(row, dict):
+                    raise ValueError(f"NDJSON line {line_number} is not an object")
+                records.append(row)
+        return [build_parsed_event(record, source) for record in records]
+
     records = json.loads(input_path.read_text(encoding="utf-8"))
-    return [build_parsed_event(record) for record in records]
+    if not isinstance(records, list):
+        raise ValueError(f"Expected JSON array in {input_path}")
+    return [build_parsed_event(record, source) for record in records]
 
 
 def insert_rows(rows: list[dict[str, Any]]) -> int:
@@ -151,7 +183,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Parse raw event logs into parsed_events records.")
     parser.add_argument(
         "--input",
-        default=str(Path(__file__).with_name("sample.json")),
+        default=str(Path(__file__).with_name("vex_logs.ndjson")),
         help="Path to JSON file containing raw log records",
     )
     parser.add_argument(
