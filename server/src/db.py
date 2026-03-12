@@ -1,0 +1,12 @@
+import os
+
+import psycopg
+from dotenv import load_dotenv
+
+
+def get_conn() -> psycopg.Connection:
+    load_dotenv()
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is not set")
+    return psycopg.connect(database_url)
