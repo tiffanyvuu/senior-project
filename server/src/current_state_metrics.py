@@ -1,0 +1,586 @@
+from __future__ import annotations
+
+import argparse
+import json
+from collections import Counter
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from statistics import mean
+from typing import Any, Iterable
+from xml.etree import ElementTree as ET
+
+class ActionLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class Direction(str, Enum):
+    INCREASING = "INCREASING"
+    STATIC = "STATIC"
+    DECREASING = "DECREASING"
+
+
+class CognitionCategory(str, Enum):
+    LONG_TERM_STALLED_PROGRESS = "LONG_TERM_STALLED_PROGRESS"
+    DEVELOPMENT_INCREASES_PROGRESS = "DEVELOPMENT_INCREASES_PROGRESS"
+    DEVELOPMENT_STATIC_PROGRESS = "DEVELOPMENT_STATIC_PROGRESS"
+    DEVELOPMENT_DECREASES_PROGRESS = "DEVELOPMENT_DECREASES_PROGRESS"
+    TRIAL_AND_ERROR = "TRIAL_AND_ERROR"
+    CODE_ABANDONMENT = "CODE_ABANDONMENT"
+    STEP_BY_STEP_ELIMINATION = "STEP_BY_STEP_ELIMINATION"
+    SNAP_N_TEST = "SNAP_N_TEST"
+    UNCLASSIFIED = "UNCLASSIFIED"
+
+
+class PersistenceCategory(str, Enum):
+    EXPECTED_COMPLETION = "EXPECTED_COMPLETION"
+    HIGH_PERSISTER = "HIGH_PERSISTER"
+    EARLY_QUITTER = "EARLY_QUITTER"
+    IN_PROGRESS = "IN_PROGRESS"
+
+
+ALLOWED_PLAYGROUNDS = {
+    "GOMARS": "GO-Mars",
+    "VIQC22": "VIQC22",
+    "ARTCANVAS": "ArtCanvas",
+    "CASTLECRASHER": "CastleCrasher",
+    "CORALREEFRESCUE": "CoralReefRescue",
+}
+
+PLAYGROUND_TARGETS = {
+    "GO-Mars": {
+        "expected_total_blocks": 8,
+        "expected_executable_blocks": 4,
+        "expected_structure_blocks": 2,
+    },
+    "VIQC22": {
+        "expected_total_blocks": 6,
+        "expected_executable_blocks": 3,
+        "expected_structure_blocks": 1,
+    },
+    "ArtCanvas": {
+        "expected_total_blocks": 8,
+        "expected_executable_blocks": 4,
+        "expected_structure_blocks": 2,
+    },
+    "CastleCrasher": {
+        "expected_total_blocks": 10,
+        "expected_executable_blocks": 5,
+        "expected_structure_blocks": 3,
+    },
+    "CoralReefRescue": {
+        "expected_total_blocks": 10,
+        "expected_executable_blocks": 5,
+        "expected_structure_blocks": 3,
+    },
+}
+
+ACTION_LEVEL_THRESHOLDS = {
+    ActionLevel.LOW: 1.5,
+    ActionLevel.MEDIUM: 3.5,
+}
+
+PROGRESS_DELTA_THRESHOLD = 5.0
+
+SWITCH_EVENTS = {"PlaygroundChange", "playgroundOpen", "menuSelect"}
+
+
+@dataclass(frozen=True)
+class EventRecord:
+    id: int | None
+    session_id: str
+    student_id: str
+    event_ts: datetime
+    event_type: str
+    playground: str | None
+    project_json: dict[str, Any] | None
+    block_event_data_json: dict[str, Any] | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class WorkspaceSummary:
+    total_non_shadow_blocks: int
+    starter_blocks: int
+    executable_blocks: int
+    structure_blocks: int
+    loop_blocks: int
+    conditional_blocks: int
+    action_blocks: int
+    sensing_blocks: int
+
+
+@dataclass(frozen=True)
+class CurrentStateSnapshot:
+    session_id: str
+    student_id: str
+    playground: str
+    time_on_task_s: float
+    action_level: ActionLevel
+    progress_pct: float
+    direction: Direction
+    cognition: CognitionCategory
+    persistence: PersistenceCategory
+    computed_from_event_id_min: int | None
+    computed_from_event_id_max: int | None
+    created_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = asdict(self)
+        payload["action_level"] = self.action_level.value
+        payload["direction"] = self.direction.value
+        payload["cognition"] = self.cognition.value
+        payload["persistence"] = self.persistence.value
+        return payload
+
+
+def parse_dt(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    raise TypeError(f"Unsupported datetime value: {value!r}")
+
+
+def normalize_playground(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = "".join(ch for ch in value.upper() if ch.isalnum())
+    return ALLOWED_PLAYGROUNDS.get(normalized)
+
+
+def canonical_playground_from_payload(
+    playground: Any,
+    project_json: dict[str, Any] | None,
+) -> str | None:
+    candidates: list[Any] = [playground]
+    if isinstance(project_json, dict):
+        candidates.append(project_json.get("playground"))
+        playground_config = project_json.get("playgroundConfig")
+        if isinstance(playground_config, dict):
+            candidates.append(playground_config.get("playground_id"))
+    for candidate in candidates:
+        canonical = normalize_playground(candidate)
+        if canonical is not None:
+            return canonical
+    return None
+
+
+def to_event_record(row: dict[str, Any]) -> EventRecord:
+    return EventRecord(
+        id=row.get("id"),
+        session_id=str(row["session_id"]),
+        student_id=str(row["student_id"]),
+        event_ts=parse_dt(row["event_ts"]),
+        event_type=str(row["event_type"]),
+        playground=canonical_playground_from_payload(row.get("playground"), row.get("project_json")),
+        project_json=row.get("project_json") if isinstance(row.get("project_json"), dict) else None,
+        block_event_data_json=row.get("block_event_data_json")
+        if isinstance(row.get("block_event_data_json"), dict)
+        else None,
+        error_message=row.get("error_message"),
+    )
+
+
+def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
+    from psycopg.rows import dict_row
+
+    from db import get_conn
+
+    sql = """
+    SELECT
+        id,
+        session_id,
+        student_id,
+        event_ts,
+        event_type,
+        playground,
+        project_json,
+        block_event_data_json,
+        error_message
+    FROM event_logs.parsed_events
+    WHERE student_id = %(student_id)s
+      AND session_id = %(session_id)s
+    ORDER BY event_ts, id
+    """
+    with get_conn() as conn:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, {"student_id": student_id, "session_id": session_id})
+            rows = cur.fetchall()
+    events = [to_event_record(dict(row)) for row in rows]
+    return [event for event in events if event.playground is not None]
+
+
+def select_current_playground_segment(events: list[EventRecord]) -> tuple[str, list[EventRecord]]:
+    if not events:
+        raise ValueError("No allowed playground events were found for this student/session.")
+
+    current_playground = events[-1].playground
+    if current_playground is None:
+        raise ValueError("Could not determine the current playground.")
+
+    start_index = 0
+    for index in range(len(events) - 1, -1, -1):
+        if events[index].playground != current_playground:
+            start_index = index + 1
+            break
+        if events[index].event_type in SWITCH_EVENTS:
+            start_index = index
+
+    segment = [event for event in events[start_index:] if event.playground == current_playground]
+    if not segment:
+        raise ValueError("Could not isolate a current playground segment for analysis.")
+    return current_playground, segment
+
+
+def extract_workspace_summary(project_json: dict[str, Any] | None) -> WorkspaceSummary:
+    if not isinstance(project_json, dict):
+        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
+
+    workspace = project_json.get("workspace")
+    if not isinstance(workspace, str) or not workspace.strip():
+        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
+
+    try:
+        root = ET.fromstring(workspace)
+    except ET.ParseError:
+        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
+
+    total_non_shadow_blocks = 0
+    starter_blocks = 0
+    executable_blocks = 0
+    structure_blocks = 0
+    loop_blocks = 0
+    conditional_blocks = 0
+    action_blocks = 0
+    sensing_blocks = 0
+
+    for node in root.iter():
+        tag = node.tag.rsplit("}", 1)[-1]
+        block_type = node.attrib.get("type")
+        if not block_type or tag not in {"block", "shadow"}:
+            continue
+        is_shadow = tag == "shadow"
+        if not is_shadow:
+            total_non_shadow_blocks += 1
+
+        if block_type.startswith("pg_events_") and not is_shadow:
+            starter_blocks += 1
+
+        if block_type.startswith("pg_drivetrain_") or block_type.startswith("pg_actions_"):
+            if not is_shadow:
+                executable_blocks += 1
+            if block_type.startswith("pg_actions_") and not is_shadow:
+                action_blocks += 1
+
+        if block_type.startswith("pg_sensing_") and not is_shadow:
+            executable_blocks += 1
+            sensing_blocks += 1
+
+        if block_type.startswith("pg_control_") and not is_shadow:
+            structure_blocks += 1
+            if any(token in block_type for token in ("repeat", "forever", "while")):
+                loop_blocks += 1
+            if "if" in block_type:
+                conditional_blocks += 1
+
+    return WorkspaceSummary(
+        total_non_shadow_blocks=total_non_shadow_blocks,
+        starter_blocks=starter_blocks,
+        executable_blocks=executable_blocks,
+        structure_blocks=structure_blocks,
+        loop_blocks=loop_blocks,
+        conditional_blocks=conditional_blocks,
+        action_blocks=action_blocks,
+        sensing_blocks=sensing_blocks,
+    )
+
+
+def compute_progress_pct(project_json: dict[str, Any] | None, playground: str) -> float:
+    summary = extract_workspace_summary(project_json)
+    targets = PLAYGROUND_TARGETS[playground]
+
+    score = 0.0
+    if summary.starter_blocks > 0:
+        score += 10.0
+    score += min(summary.executable_blocks / targets["expected_executable_blocks"], 1.0) * 45.0
+    score += min(summary.structure_blocks / targets["expected_structure_blocks"], 1.0) * 25.0
+    score += min(summary.total_non_shadow_blocks / targets["expected_total_blocks"], 1.0) * 20.0
+    return round(min(score, 100.0), 2)
+
+
+def compute_time_on_task_s(events: list[EventRecord]) -> float:
+    if len(events) <= 1:
+        return 0.0
+    return max((events[-1].event_ts - events[0].event_ts).total_seconds(), 0.0)
+
+
+def compute_action_level(total_events: int, time_on_task_s: float) -> ActionLevel:
+    actions_per_min = total_events / max(time_on_task_s / 60.0, 1.0)
+    if actions_per_min < ACTION_LEVEL_THRESHOLDS[ActionLevel.LOW]:
+        return ActionLevel.LOW
+    if actions_per_min <= ACTION_LEVEL_THRESHOLDS[ActionLevel.MEDIUM]:
+        return ActionLevel.MEDIUM
+    return ActionLevel.HIGH
+
+
+def build_progress_series(events: list[EventRecord], playground: str) -> list[tuple[datetime, float]]:
+    series: list[tuple[datetime, float]] = []
+    for event in events:
+        if event.project_json is None:
+            continue
+        series.append((event.event_ts, compute_progress_pct(event.project_json, playground)))
+    return series
+
+
+def compute_direction(
+    progress_series: list[tuple[datetime, float]],
+    segment_start: datetime,
+    segment_end: datetime,
+) -> Direction:
+    if not progress_series:
+        return Direction.STATIC
+
+    midpoint = segment_start + ((segment_end - segment_start) / 2)
+    first_half = [progress for ts, progress in progress_series if ts <= midpoint]
+    second_half = [progress for ts, progress in progress_series if ts > midpoint]
+
+    if not first_half:
+        first_half = [progress_series[0][1]]
+    if not second_half:
+        second_half = [progress_series[-1][1]]
+
+    delta = mean(second_half) - mean(first_half)
+    if delta >= PROGRESS_DELTA_THRESHOLD:
+        return Direction.INCREASING
+    if delta <= -PROGRESS_DELTA_THRESHOLD:
+        return Direction.DECREASING
+    return Direction.STATIC
+
+
+def compress_progress_values(progress_values: Iterable[float]) -> list[float]:
+    compressed: list[float] = []
+    for value in progress_values:
+        if not compressed or value != compressed[-1]:
+            compressed.append(value)
+    return compressed
+
+
+def significant_deltas(progress_values: list[float]) -> list[float]:
+    deltas: list[float] = []
+    for prev, current in zip(progress_values, progress_values[1:]):
+        delta = round(current - prev, 2)
+        if abs(delta) >= PROGRESS_DELTA_THRESHOLD:
+            deltas.append(delta)
+    return deltas
+
+
+def classify_persistence(
+    time_on_task_s: float,
+    action_level: ActionLevel,
+    progress_pct: float,
+    direction: Direction,
+) -> PersistenceCategory:
+    if progress_pct >= 67.0 or (direction == Direction.INCREASING and progress_pct >= 50.0):
+        return PersistenceCategory.EXPECTED_COMPLETION
+    if time_on_task_s >= 600.0 and action_level == ActionLevel.HIGH and progress_pct < 33.0:
+        return PersistenceCategory.HIGH_PERSISTER
+    if time_on_task_s <= 120.0 and progress_pct < 10.0 and action_level == ActionLevel.LOW:
+        return PersistenceCategory.EARLY_QUITTER
+    return PersistenceCategory.IN_PROGRESS
+
+
+def classify_cognition(
+    events: list[EventRecord],
+    progress_series: list[tuple[datetime, float]],
+    time_on_task_s: float,
+    action_level: ActionLevel,
+    progress_pct: float,
+    direction: Direction,
+) -> CognitionCategory:
+    if time_on_task_s >= 600.0 and progress_pct < 10.0 and action_level != ActionLevel.HIGH:
+        return CognitionCategory.LONG_TERM_STALLED_PROGRESS
+    if direction == Direction.INCREASING and progress_pct >= 10.0:
+        return CognitionCategory.DEVELOPMENT_INCREASES_PROGRESS
+    if direction == Direction.STATIC and time_on_task_s >= 300.0:
+        return CognitionCategory.DEVELOPMENT_STATIC_PROGRESS
+    if direction == Direction.DECREASING and progress_pct >= 10.0:
+        return CognitionCategory.DEVELOPMENT_DECREASES_PROGRESS
+
+    progress_values = compress_progress_values([progress for _, progress in progress_series])
+    deltas = significant_deltas(progress_values)
+    event_counts = Counter(event.event_type for event in events)
+    run_count = event_counts["runProject"]
+    delete_count = event_counts["blockDeleted"]
+    snap_count = 0
+    unsnap_count = 0
+    last_edit_ts: datetime | None = None
+    last_run_ts: datetime | None = None
+
+    for event in events:
+        if event.event_type == "runProject":
+            last_run_ts = event.event_ts
+        if event.event_type in {"blockCreated", "blockChanged", "blockDeleted", "blockMoved"}:
+            last_edit_ts = event.event_ts
+        if event.event_type != "blockMoved" or not isinstance(event.block_event_data_json, dict):
+            continue
+        old_info = event.block_event_data_json.get("oldInfo")
+        new_info = event.block_event_data_json.get("newInfo")
+        if isinstance(new_info, dict) and "parent" in new_info:
+            snap_count += 1
+        if isinstance(old_info, dict) and "parent" in old_info and not (
+            isinstance(new_info, dict) and "parent" in new_info
+        ):
+            unsnap_count += 1
+
+    progress_range = (max(progress_values) - min(progress_values)) if progress_values else 0.0
+    sign_changes = 0
+    for previous, current in zip(deltas, deltas[1:]):
+        if previous * current < 0:
+            sign_changes += 1
+
+    if action_level == ActionLevel.HIGH and progress_range >= 10.0 and sign_changes >= 1:
+        return CognitionCategory.TRIAL_AND_ERROR
+
+    if len(progress_values) >= 3:
+        peak_index = max(range(len(progress_values)), key=lambda index: progress_values[index])
+        peak_progress = progress_values[peak_index]
+        final_progress = progress_values[-1]
+        after_peak = progress_values[peak_index:]
+        after_peak_deltas = [curr - prev for prev, curr in zip(after_peak, after_peak[1:])]
+        if (
+            peak_progress - final_progress >= 15.0
+            and after_peak_deltas
+            and all(delta <= 0 for delta in after_peak_deltas)
+            and action_level in {ActionLevel.MEDIUM, ActionLevel.HIGH}
+        ):
+            return CognitionCategory.CODE_ABANDONMENT
+
+    if deltas:
+        total_gain = progress_values[-1] - progress_values[0]
+        negative_deltas = [delta for delta in deltas if delta < 0]
+        if (
+            total_gain >= 10.0
+            and len(negative_deltas) <= 1
+            and direction == Direction.INCREASING
+            and action_level in {ActionLevel.MEDIUM, ActionLevel.HIGH}
+        ):
+            return CognitionCategory.STEP_BY_STEP_ELIMINATION
+
+    if (
+        run_count >= 1
+        and snap_count >= 1
+        and (delete_count + unsnap_count) >= 1
+        and last_run_ts is not None
+        and last_edit_ts is not None
+        and (last_run_ts - last_edit_ts) <= timedelta(seconds=90)
+    ):
+        return CognitionCategory.SNAP_N_TEST
+
+    return CognitionCategory.UNCLASSIFIED
+
+
+def analyze_current_state(events: list[EventRecord]) -> CurrentStateSnapshot:
+    playground, segment = select_current_playground_segment(events)
+    time_on_task_s = round(compute_time_on_task_s(segment), 2)
+    action_level = compute_action_level(len(segment), time_on_task_s)
+    progress_series = build_progress_series(segment, playground)
+    progress_pct = round(progress_series[-1][1], 2) if progress_series else 0.0
+    direction = compute_direction(progress_series, segment[0].event_ts, segment[-1].event_ts)
+    cognition = classify_cognition(
+        segment,
+        progress_series,
+        time_on_task_s,
+        action_level,
+        progress_pct,
+        direction,
+    )
+    persistence = classify_persistence(time_on_task_s, action_level, progress_pct, direction)
+
+    event_ids = [event.id for event in segment if event.id is not None]
+    return CurrentStateSnapshot(
+        session_id=segment[0].session_id,
+        student_id=segment[0].student_id,
+        playground=playground,
+        time_on_task_s=time_on_task_s,
+        action_level=action_level,
+        progress_pct=progress_pct,
+        direction=direction,
+        cognition=cognition,
+        persistence=persistence,
+        computed_from_event_id_min=min(event_ids) if event_ids else None,
+        computed_from_event_id_max=max(event_ids) if event_ids else None,
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def upsert_snapshot(snapshot: CurrentStateSnapshot) -> None:
+    from db import get_conn
+
+    sql = """
+    INSERT INTO current_state.state_snapshots (
+        session_id,
+        student_id,
+        time_on_task_s,
+        action_level,
+        progress_pct,
+        direction,
+        cognition,
+        persistence,
+        computed_from_event_id_min,
+        computed_from_event_id_max,
+        created_at
+    )
+    VALUES (
+        %(session_id)s,
+        %(student_id)s,
+        %(time_on_task_s)s,
+        %(action_level)s,
+        %(progress_pct)s,
+        %(direction)s,
+        %(cognition)s,
+        %(persistence)s,
+        %(computed_from_event_id_min)s,
+        %(computed_from_event_id_max)s,
+        %(created_at)s
+    )
+    ON CONFLICT (session_id, student_id)
+    DO UPDATE SET
+        time_on_task_s = EXCLUDED.time_on_task_s,
+        action_level = EXCLUDED.action_level,
+        progress_pct = EXCLUDED.progress_pct,
+        direction = EXCLUDED.direction,
+        cognition = EXCLUDED.cognition,
+        persistence = EXCLUDED.persistence,
+        computed_from_event_id_min = EXCLUDED.computed_from_event_id_min,
+        computed_from_event_id_max = EXCLUDED.computed_from_event_id_max,
+        created_at = EXCLUDED.created_at
+    """
+    payload = snapshot.to_dict()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, payload)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Compute a current-state snapshot for a student/session.")
+    parser.add_argument("--student-id", required=True, help="Student ID to analyze")
+    parser.add_argument("--session-id", required=True, help="Session ID to analyze")
+    parser.add_argument(
+        "--insert",
+        action="store_true",
+        help="Upsert the computed snapshot into current_state.state_snapshots",
+    )
+    args = parser.parse_args()
+
+    events = fetch_events_from_db(args.student_id, args.session_id)
+    snapshot = analyze_current_state(events)
+    if args.insert:
+        upsert_snapshot(snapshot)
+    print(json.dumps(snapshot.to_dict(), indent=2))
+
+
+if __name__ == "__main__":
+    main()
