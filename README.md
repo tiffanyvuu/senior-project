@@ -11,8 +11,10 @@ Use local Postgres per team member, and apply the same migration files.
    - `pip install -r server/requirements.txt`
 3. Create your own `.env` at repo root:
    - `DATABASE_URL=postgresql://USERNAME:PASSWORD@localhost:5432/DBNAME`
-4. Run migration:
+4. Run migrations:
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/001_create_parsed_events.sql"`
+   - `psql "$env:DATABASE_URL" -f "server/db/migrations/002_create_state_snapshots.sql"`
+   - `psql "$env:DATABASE_URL" -f "server/db/migrations/003_add_playground_data_to_parsed_events.sql"`
 5. Load parsed logs:
    - `python server/src/parse_event_logs.py --insert`
 

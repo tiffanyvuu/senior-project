@@ -67,6 +67,9 @@ def extract_payload(raw_record: dict[str, Any]) -> dict[str, Any]:
 def build_parsed_event(raw_record: dict[str, Any], source: str) -> dict[str, Any]:
     record_id = raw_record.get("id")
     payload = extract_payload(raw_record)
+    source_received_at = parse_iso_timestamp(
+        raw_record.get("received_at", raw_record.get("recieved_at"))
+    )
 
     session_id = require_non_null(record_id, "sessionID", payload.get("sessionID"))
     student_id = require_non_null(record_id, "studentID", payload.get("studentID"))
@@ -83,9 +86,13 @@ def build_parsed_event(raw_record: dict[str, Any], source: str) -> dict[str, Any
         "playground": payload.get("playground"),
         "project_json": parse_json_string_or_none(payload.get("project")),
         "block_event_data_json": parse_json_string_or_none(payload.get("blockEventData")),
+        "playground_data_json": parse_json_string_or_none(payload.get("playgroundData")),
         "has_orphans": payload.get("hasOrphans"),
         "switch_block_count": payload.get("switchBlockCount"),
         "error_message": payload.get("errorMessage"),
+        "source_log_id": record_id if isinstance(record_id, int) else None,
+        "source_received_at": source_received_at,
+        "source_queue": raw_record.get("queue_name") or raw_record.get("queue"),
         "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -157,9 +164,13 @@ def insert_rows(rows: list[dict[str, Any]]) -> int:
         playground,
         project_json,
         block_event_data_json,
+        playground_data_json,
         has_orphans,
         switch_block_count,
         error_message,
+        source_log_id,
+        source_received_at,
+        source_queue,
         source
     )
     VALUES (
@@ -172,9 +183,13 @@ def insert_rows(rows: list[dict[str, Any]]) -> int:
         %(playground)s,
         %(project_json)s,
         %(block_event_data_json)s,
+        %(playground_data_json)s,
         %(has_orphans)s,
         %(switch_block_count)s,
         %(error_message)s,
+        %(source_log_id)s,
+        %(source_received_at)s,
+        %(source_queue)s,
         %(source)s
     )
     """
@@ -190,9 +205,15 @@ def insert_rows(rows: list[dict[str, Any]]) -> int:
             "playground": row["playground"],
             "project_json": Json(row["project_json"]) if row["project_json"] is not None else None,
             "block_event_data_json": Json(row["block_event_data_json"]) if row["block_event_data_json"] is not None else None,
+            "playground_data_json": Json(row["playground_data_json"])
+            if row["playground_data_json"] is not None
+            else None,
             "has_orphans": row["has_orphans"],
             "switch_block_count": row["switch_block_count"],
             "error_message": row["error_message"],
+            "source_log_id": row["source_log_id"],
+            "source_received_at": row["source_received_at"],
+            "source_queue": row["source_queue"],
             "source": row["source"],
         }
         for row in rows
