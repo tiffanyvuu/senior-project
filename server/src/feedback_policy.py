@@ -23,7 +23,7 @@ class FeedbackClass(Enum):
     NUDGE = "Nudge"
     DIAGNOSE = "Diagnose"
     QUESTION = "Question"
-    FILL_IN_THE_BLANK = "Fill-in-the-blank"
+    # FILL_IN_THE_BLANK = "Fill-in-the-blank"
     ELABORATE = "Elaborate"
     REPEAT = "Repeat"
     NEXT_STEP = "Next Step"
@@ -47,60 +47,64 @@ class FeedbackClassInput:
     high_persister: bool = False
     early_quitter: bool = False
 
-def determine_feedback_class(x: FeedbackClassInput) -> list[FeedbackClass]:
-    feedback_classes = []
+def determine_feedback_class(x: FeedbackClassInput) -> set[FeedbackClass]:
+    feedback_classes = set()
 
     # Long-term stalled progress -> Help out -> c.i
     if x.long_term_stalled_progress:
-        feedback_classes.append(FeedbackClass.ERROR_FLAGGING)
+        feedback_classes.add(FeedbackClass.ERROR_FLAGGING)
 
     # Development increases progress -> Reflection/Rehearsal -> c.viii
     if x.development_increases_progress:
-        feedback_classes.append(FeedbackClass.ELABORATE)
+        feedback_classes.add(FeedbackClass.ELABORATE)
 
     # Development for static progress -> Motivate to keep persisting -> b.ii
     if x.development_static_progress:
-        feedback_classes.append(FeedbackClass.REASSURE)
+        feedback_classes.add(FeedbackClass.REASSURE)
 
-    # Development decreases progress -> Corrective explanation -> c.ii
+    # Development decreases progress -> Corrective explanation -> c.iii
     if x.development_decreases_progress:
-        feedback_classes.append(FeedbackClass.HOW_TO)
+        feedback_classes.add(FeedbackClass.INFORM)
 
     # Trial & Error -> a.ii
     if x.trial_and_error:
-        feedback_classes.append(FeedbackClass.PARTIAL_CORRECTNESS)
+        feedback_classes.add(FeedbackClass.PARTIAL_CORRECTNESS)
         
         # -> b.i
         if x.expected_completion:
-            feedback_classes.append(FeedbackClass.EVIDENCE_BASED_PRAISE)
+            feedback_classes.add(FeedbackClass.EVIDENCE_BASED_PRAISE)
 
         # -> b.ii
         if x.high_persister:
-            feedback_classes.append(FeedbackClass.REASSURE)
+            feedback_classes.add(FeedbackClass.REASSURE)
 
         # -> c.ii
         if x.early_quitter:
-            feedback_classes.append(FeedbackClass.HOW_TO)
+            feedback_classes.add(FeedbackClass.HOW_TO)
 
     # Code abandonment
     if x.code_abandonment:
 
         # -> c.v
         if x.expected_completion or x.early_quitter:
-            feedback_classes.append(FeedbackClass.DIAGNOSE)
+            feedback_classes.add(FeedbackClass.DIAGNOSE)
 
         # TO DO: always reassure, first two times elaborate, after fill in the blank
         # -> b.ii, c.vii, c.viii
         if x.high_persister:
-            feedback_classes.append(FeedbackClass.REASSURE, FeedbackClass.FILL_IN_THE_BLANK, FeedbackClass.ELABORATE)
+            feedback_classes.update({
+                FeedbackClass.REASSURE,
+                # FeedbackClass.FILL_IN_THE_BLANK,
+                FeedbackClass.ELABORATE,
+            })
 
     # Step-by-step elimination -> c.iv
     if x.step_by_step_elimination:
-        feedback_classes.append(FeedbackClass.NUDGE)
+        feedback_classes.add(FeedbackClass.NUDGE)
 
     # Snap'n test -> c.ii
     if x.snap_n_test:
-        feedback_classes.append(FeedbackClass.HOW_TO)
+        feedback_classes.add(FeedbackClass.INFORM)
 
     return feedback_classes
 
@@ -108,8 +112,8 @@ def determine_feedback_class(x: FeedbackClassInput) -> list[FeedbackClass]:
 if __name__ == "__main__":
     x = FeedbackClassInput(
         # Categories determined by Current State Analyzer
-        code_abandonment = True,
-        early_quitter = True
+        code_abandonment=True,
+        early_quitter=True
     )
 
     feedback_classes = determine_feedback_class(x)

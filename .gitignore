@@ -18,6 +18,7 @@ venv/
 
 # React / Node frontend
 node_modules/
+client/.vite/
 dist/
 build/
 
