@@ -14,6 +14,12 @@ const starterMessages = [
 ];
 
 function App() {
+  const [studentIdDraft, setStudentIdDraft] = useState("");
+  const [playgroundDraft, setPlaygroundDraft] = useState("");
+  const [sessionIdDraft, setSessionIdDraft] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [playground, setPlayground] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(starterMessages);
   const [pendingAction, setPendingAction] = useState("");
@@ -21,18 +27,9 @@ function App() {
   const [openReviews, setOpenReviews] = useState({});
   const [pendingFeedback, setPendingFeedback] = useState({});
   const apiBase = defaultApiBase;
-  const studentId = "student-1";
 
   const appendMessage = (message) => {
     setMessages((current) => [...current, message]);
-  };
-
-  const buildTemporaryReply = (messageText) => {
-    if (!messageText.trim()) {
-      return "Think about if your while loop condition ever becomes false.";
-    }
-
-    return "Think about if your while loop condition ever becomes false.";
   };
 
   const postJson = async (path, payload) => {
@@ -127,6 +124,19 @@ function App() {
     }
   };
 
+  const handleStudentStart = (event) => {
+    event.preventDefault();
+    const trimmedStudentId = studentIdDraft.trim();
+    const trimmedPlayground = playgroundDraft.trim();
+    const trimmedSessionId = sessionIdDraft.trim();
+    if (!trimmedStudentId || !trimmedPlayground || !trimmedSessionId) {
+      return;
+    }
+    setStudentId(trimmedStudentId);
+    setPlayground(trimmedPlayground);
+    setSessionId(trimmedSessionId);
+  };
+
   const handleSend = async (event) => {
     event.preventDefault();
 
@@ -148,12 +158,15 @@ function App() {
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
+        session_id: sessionId,
         message: trimmedDraft,
+        playground,
       });
-      const responseText = buildTemporaryReply(trimmedDraft);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text: responseText,
+        session_id: sessionId,
+        playground,
+        student_message: trimmedDraft,
       });
       setMessages((current) =>
         [
@@ -169,7 +182,7 @@ function App() {
             id: responseRecord.response_id,
             role: "assistant",
             body: responseRecord.response_text,
-            meta: "Temporary test reply",
+            meta: responseRecord.llm_model || "Generated response",
             canFeedback: true,
           },
         ],
@@ -195,18 +208,21 @@ function App() {
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
+        session_id: sessionId,
         message: "",
+        playground,
       });
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text:
-          "Think about if your while loop condition ever becomes false.",
+        session_id: sessionId,
+        playground,
+        student_message: "Help",
       });
       appendMessage({
         id: responseRecord.response_id,
         role: "assistant",
         body: responseRecord.response_text,
-        meta: "Temporary test reply",
+        meta: responseRecord.llm_model || "Generated response",
         canFeedback: true,
       });
     } catch (error) {
@@ -221,13 +237,60 @@ function App() {
     }
   };
 
+  if (!studentId) {
+    return (
+      <main className="app-shell">
+        <section className="start-card">
+          <h1>Start Chat</h1>
+          <p>Enter your student ID, playground, and session ID before starting the chat.</p>
+          <form className="start-form" onSubmit={handleStudentStart}>
+            <label className="sr-only" htmlFor="student-id">
+              Student ID
+            </label>
+            <input
+              id="student-id"
+              type="text"
+              value={studentIdDraft}
+              onChange={(event) => setStudentIdDraft(event.target.value)}
+              placeholder="Student ID"
+              autoComplete="off"
+            />
+            <label className="sr-only" htmlFor="playground">
+              Playground
+            </label>
+            <input
+              id="playground"
+              type="text"
+              value={playgroundDraft}
+              onChange={(event) => setPlaygroundDraft(event.target.value)}
+              placeholder="Playground"
+              autoComplete="off"
+            />
+            <label className="sr-only" htmlFor="session-id">
+              Session ID
+            </label>
+            <input
+              id="session-id"
+              type="text"
+              value={sessionIdDraft}
+              onChange={(event) => setSessionIdDraft(event.target.value)}
+              placeholder="Session ID (UUID)"
+              autoComplete="off"
+            />
+            <button type="submit">Start Chat</button>
+          </form>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <section className="chat-card">
         <header className="toolbar">
           <div className="toolbar-copy">
             <h1>Chat</h1>
-            <p>Ask a question or press Help.</p>
+            <p>{studentId} · {playground} · {sessionId}</p>
           </div>
           <button
             type="button"

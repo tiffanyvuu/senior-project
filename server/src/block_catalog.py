@@ -1,0 +1,48 @@
+AVAILABLE_BLOCKS = {
+    "default": [],
+    "PitchingIn": [
+        "when started",
+        "drive forward for",
+        "drive backward for",
+        "turn right for",
+        "turn left for",
+        "set drive velocity to",
+        "spin intake forward",
+        "spin intake reverse",
+        "stop intake",
+        "set catapult velocity to",
+        "spin catapult forward",
+        "spin catapult to position",
+        "wait until",
+        "if then",
+        "if then else",
+        "repeat",
+        "repeat until",
+        "while",
+        "drivetrain heading",
+        "bumper pressed",
+        "down eye detects",
+    ],
+    "MarsMathExpedition": [
+        "when started",
+        "drive forward for",
+        "drive backward for",
+        "turn right for",
+        "turn left for",
+        "set drive velocity to",
+        "spin arm motor for",
+        "spin arm motor to position",
+        "wait until",
+        "if then",
+        "if then else",
+        "repeat",
+        "repeat until",
+        "while",
+        "front eye detects object",
+        "front eye detects color",
+    ],
+}
+
+
+def resolve_available_blocks(playground: str) -> list[str]:
+    return AVAILABLE_BLOCKS.get(playground, AVAILABLE_BLOCKS["default"])

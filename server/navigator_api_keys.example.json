@@ -1,0 +1,4 @@
+{
+  "OPENAI_API_KEY": "put-your-navigator-api-key-here",
+  "base_url": "https://api.ai.it.ufl.edu/"
+}

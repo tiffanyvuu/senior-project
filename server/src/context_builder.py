@@ -5,6 +5,8 @@ Context Builder
 from dataclasses import dataclass, field
 from typing import List
 
+from src.feedback_policy import FeedbackClass
+
 @dataclass
 class FeedbackSpec:
     description: str
@@ -146,7 +148,7 @@ FEEDBACK_SPECS = {
             "This is useful when the learner is possibly misunderstanding the task or outcome."
         ]
     ),
-    "Next Step (this is a last resort action when others have not worked)": FeedbackSpec(
+    "Next Step": FeedbackSpec(
         description="Gives a single immediate robotics action to try next.",
         examples=[
             "You could try changing the turn value to 90 degrees and try again.",
@@ -158,13 +160,36 @@ FEEDBACK_SPECS = {
     )
 }
 
-PROMPT_TEMPLATE = """You are an educational feedback assistant for VEXcode VR (VFF - Enhance learning).
+FEEDBACK_CLASS_TO_SPEC_KEY = {
+    FeedbackClass.POSITIVE_FEEDBACK: "Positive Feedback",
+    FeedbackClass.PARTIAL_CORRECTNESS: "Partial Correctness",
+    FeedbackClass.CORRECTIVE_GUIDANCE: "Corrective Guidance",
+    FeedbackClass.EVIDENCE_BASED_PRAISE: "Evidence-Based Praise",
+    FeedbackClass.REASSURE: "Reassure",
+    FeedbackClass.ERROR_FLAGGING: "Error Flagging",
+    FeedbackClass.HOW_TO: "How To",
+    FeedbackClass.INFORM: "Inform",
+    FeedbackClass.NUDGE: "Hint",
+    FeedbackClass.DIAGNOSE: "Encourage Testing (Diagnose)",
+    FeedbackClass.QUESTION: "Question",
+    FeedbackClass.ELABORATE: "Elaborate",
+    FeedbackClass.REPEAT: "Remind",
+    FeedbackClass.NEXT_STEP: "Next Step",
+}
+
+PROMPT_TEMPLATE = """You are an educational feedback assistant for VEXcode VR.
 
 Task:
 {task}
 
-Student struggle:
-{struggle}
+Available blocks:
+{available_blocks}
+
+Student message:
+{student_message}
+
+Recent chat in this session:
+{recent_chat}
 
 Feedback types to use (combine them in one message):
 {feedback_types}
@@ -201,10 +226,17 @@ Write one short, natural-sounding feedback message for the student that incorpor
 Requirements:
 - Use all feedback types in a cohesive way (do not output separate messages).
 - Be concise and specific.
-- Do not invent details beyond the task and struggle.
+- Do not invent details beyond the task and student message.
 """
 
-def build_feedback_prompt(task: str, struggle: str, feedback_types: list[str], feedback_specs: dict) -> str:
+def build_feedback_prompt(
+    task: str,
+    student_message: str,
+    available_blocks: str,
+    recent_chat: str,
+    feedback_types: list[str],
+    feedback_specs: dict,
+) -> str:
     feedback_types_text = "\n".join(f"- {t}" for t in feedback_types)
 
     descriptions_text = "\n\n".join(
@@ -224,22 +256,59 @@ def build_feedback_prompt(task: str, struggle: str, feedback_types: list[str], f
 
     return PROMPT_TEMPLATE.format(
         task=task,
-        struggle=struggle,
+        student_message=student_message,
+        available_blocks=available_blocks,
+        recent_chat=recent_chat,
         feedback_types=feedback_types_text,
         descriptions=descriptions_text,
         examples=examples_text,
         extra_notes=extra_notes_text,
     )
 
+
+def build_feedback_prompt_from_classes(
+    task: str,
+    student_message: str,
+    available_blocks: list[str] | None,
+    recent_messages: list[dict[str, str]],
+    feedback_classes: set[FeedbackClass],
+) -> str:
+    feedback_types = []
+    for feedback_class in feedback_classes:
+        feedback_type = FEEDBACK_CLASS_TO_SPEC_KEY.get(feedback_class)
+        if feedback_type and feedback_type not in feedback_types:
+            feedback_types.append(feedback_type)
+
+    recent_chat = "\n".join(
+        f"{message['role'].capitalize()}: {message['content']}"
+        for message in recent_messages
+    )
+    if not recent_chat:
+        recent_chat = "None"
+
+    available_blocks_text = "\n".join(f"- {block}" for block in available_blocks or [])
+    if not available_blocks_text:
+        available_blocks_text = "None provided"
+
+    return build_feedback_prompt(
+        task=task,
+        student_message=student_message,
+        available_blocks=available_blocks_text,
+        recent_chat=recent_chat,
+        feedback_types=feedback_types,
+        feedback_specs=FEEDBACK_SPECS,
+    )
+
 if __name__ == "__main__":
     task = "Have the robot drive forward to pick up all trash without falling off the cliff."
-    struggle = "The robot keeps driving too far and falls off the cliff."
 
     feedback_types = ["Error Flagging", "How To"]
 
     prompt = build_feedback_prompt(
         task=task,
-        struggle=struggle,
+        student_message="Why does my robot keep driving forever?",
+        available_blocks="None provided",
+        recent_chat="None",
         feedback_types=feedback_types,
         feedback_specs=FEEDBACK_SPECS,
     )
