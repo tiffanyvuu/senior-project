@@ -91,30 +91,55 @@ def build_parsed_event(raw_record: dict[str, Any], source: str) -> dict[str, Any
     }
 
 
+def parse_records(records: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
+    parsed_rows: list[dict[str, Any]] = []
+    for index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            raise ValueError(f"Record {index} from {source} is not an object")
+        parsed_rows.append(build_parsed_event(record, source))
+    return parsed_rows
+
+
+def parse_ndjson_text(text: str, source: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        normalized = line.strip()
+        if not normalized:
+            continue
+        try:
+            row = json.loads(normalized)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid NDJSON at line {line_number}: {exc}") from exc
+        if not isinstance(row, dict):
+            raise ValueError(f"NDJSON line {line_number} is not an object")
+        records.append(row)
+    return parse_records(records, source)
+
+
+def parse_text_blob(text: str, source: str) -> list[dict[str, Any]]:
+    normalized = text.lstrip()
+    if not normalized:
+        return []
+    if normalized.startswith("["):
+        records = json.loads(normalized)
+        if not isinstance(records, list):
+            raise ValueError(f"Expected JSON array in {source}")
+        return parse_records(records, source)
+    return parse_ndjson_text(text, source)
+
+
 def parse_file(input_path: Path) -> list[dict[str, Any]]:
     source = input_path.name
     suffix = input_path.suffix.lower()
+    text = input_path.read_text(encoding="utf-8")
 
     if suffix in {".ndjson", ".jsonl"}:
-        records: list[dict[str, Any]] = []
-        with input_path.open("r", encoding="utf-8") as fh:
-            for line_number, line in enumerate(fh, start=1):
-                text = line.strip()
-                if not text:
-                    continue
-                try:
-                    row = json.loads(text)
-                except json.JSONDecodeError as exc:
-                    raise ValueError(f"Invalid NDJSON at line {line_number}: {exc}") from exc
-                if not isinstance(row, dict):
-                    raise ValueError(f"NDJSON line {line_number} is not an object")
-                records.append(row)
-        return [build_parsed_event(record, source) for record in records]
+        return parse_ndjson_text(text, source)
 
-    records = json.loads(input_path.read_text(encoding="utf-8"))
+    records = json.loads(text)
     if not isinstance(records, list):
         raise ValueError(f"Expected JSON array in {input_path}")
-    return [build_parsed_event(record, source) for record in records]
+    return parse_records(records, source)
 
 
 def insert_rows(rows: list[dict[str, Any]]) -> int:
@@ -183,7 +208,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Parse raw event logs into parsed_events records.")
     parser.add_argument(
         "--input",
-        default=str(Path(__file__).with_name("vex_logs.ndjson")),
+        required=True,
         help="Path to JSON file containing raw log records",
     )
     parser.add_argument(
