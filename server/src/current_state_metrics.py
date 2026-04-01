@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from statistics import mean
 from typing import Any, Iterable
-from xml.etree import ElementTree as ET
 
 class ActionLevel(str, Enum):
     LOW = "LOW"
@@ -43,38 +42,25 @@ class PersistenceCategory(str, Enum):
 
 ALLOWED_PLAYGROUNDS = {
     "GOMARS": "GO-Mars",
-    "VIQC22": "VIQC22",
-    "ARTCANVAS": "ArtCanvas",
-    "CASTLECRASHER": "CastleCrasher",
-    "CORALREEFRESCUE": "CoralReefRescue",
 }
 
-PLAYGROUND_TARGETS = {
-    "GO-Mars": {
-        "expected_total_blocks": 8,
-        "expected_executable_blocks": 4,
-        "expected_structure_blocks": 2,
-    },
-    "VIQC22": {
-        "expected_total_blocks": 6,
-        "expected_executable_blocks": 3,
-        "expected_structure_blocks": 1,
-    },
-    "ArtCanvas": {
-        "expected_total_blocks": 8,
-        "expected_executable_blocks": 4,
-        "expected_structure_blocks": 2,
-    },
-    "CastleCrasher": {
-        "expected_total_blocks": 10,
-        "expected_executable_blocks": 5,
-        "expected_structure_blocks": 3,
-    },
-    "CoralReefRescue": {
-        "expected_total_blocks": 10,
-        "expected_executable_blocks": 5,
-        "expected_structure_blocks": 3,
-    },
+GO_MARS_BOOLEAN_PROGRESS_WEIGHTS = {
+    "tilted_solarPanel": 15.0,
+    "cleared_debris_landingSite": 15.0,
+    "placed_helicopter_landingSite": 15.0,
+    "lifted_rocketShip_upright": 15.0,
+    "rover_rescued": 15.0,
+}
+
+# Count-based GO-Mars metrics are treated as "progress made" once they are > 0
+# We can tighten these into fuller target-based normalization later if the exact maxima for each task become part of the scoring rubric.
+GO_MARS_COUNT_PROGRESS_WEIGHTS = {
+    "removed_samples_crater": 8.0,
+    "samples_moved_lab": 5.0,
+    "samples_moved_lab_top": 4.0,
+    "removed_fuel_cells_craters": 3.0,
+    "moved_fuel_cells_rocketShip": 3.0,
+    "moved_fuel_cells_landingSite": 2.0,
 }
 
 ACTION_LEVEL_THRESHOLDS = {
@@ -97,19 +83,8 @@ class EventRecord:
     playground: str | None
     project_json: dict[str, Any] | None
     block_event_data_json: dict[str, Any] | None
+    playground_data_json: dict[str, Any] | None
     error_message: str | None
-
-
-@dataclass(frozen=True)
-class WorkspaceSummary:
-    total_non_shadow_blocks: int
-    starter_blocks: int
-    executable_blocks: int
-    structure_blocks: int
-    loop_blocks: int
-    conditional_blocks: int
-    action_blocks: int
-    sensing_blocks: int
 
 
 @dataclass(frozen=True)
@@ -154,6 +129,7 @@ def normalize_playground(value: Any) -> str | None:
 def canonical_playground_from_payload(
     playground: Any,
     project_json: dict[str, Any] | None,
+    playground_data_json: dict[str, Any] | None,
 ) -> str | None:
     candidates: list[Any] = [playground]
     if isinstance(project_json, dict):
@@ -161,6 +137,8 @@ def canonical_playground_from_payload(
         playground_config = project_json.get("playgroundConfig")
         if isinstance(playground_config, dict):
             candidates.append(playground_config.get("playground_id"))
+    if isinstance(playground_data_json, dict):
+        candidates.append(playground_data_json.get("playground"))
     for candidate in candidates:
         canonical = normalize_playground(candidate)
         if canonical is not None:
@@ -169,17 +147,25 @@ def canonical_playground_from_payload(
 
 
 def to_event_record(row: dict[str, Any]) -> EventRecord:
+    playground_data_json = (
+        row.get("playground_data_json") if isinstance(row.get("playground_data_json"), dict) else None
+    )
     return EventRecord(
         id=row.get("id"),
         session_id=str(row["session_id"]),
         student_id=str(row["student_id"]),
         event_ts=parse_dt(row["event_ts"]),
         event_type=str(row["event_type"]),
-        playground=canonical_playground_from_payload(row.get("playground"), row.get("project_json")),
+        playground=canonical_playground_from_payload(
+            row.get("playground"),
+            row.get("project_json"),
+            playground_data_json,
+        ),
         project_json=row.get("project_json") if isinstance(row.get("project_json"), dict) else None,
         block_event_data_json=row.get("block_event_data_json")
         if isinstance(row.get("block_event_data_json"), dict)
         else None,
+        playground_data_json=playground_data_json,
         error_message=row.get("error_message"),
     )
 
@@ -199,6 +185,7 @@ def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
         playground,
         project_json,
         block_event_data_json,
+        playground_data_json,
         error_message
     FROM event_logs.parsed_events
     WHERE student_id = %(student_id)s
@@ -235,80 +222,37 @@ def select_current_playground_segment(events: list[EventRecord]) -> tuple[str, l
     return current_playground, segment
 
 
-def extract_workspace_summary(project_json: dict[str, Any] | None) -> WorkspaceSummary:
-    if not isinstance(project_json, dict):
-        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
-
-    workspace = project_json.get("workspace")
-    if not isinstance(workspace, str) or not workspace.strip():
-        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
-
-    try:
-        root = ET.fromstring(workspace)
-    except ET.ParseError:
-        return WorkspaceSummary(0, 0, 0, 0, 0, 0, 0, 0)
-
-    total_non_shadow_blocks = 0
-    starter_blocks = 0
-    executable_blocks = 0
-    structure_blocks = 0
-    loop_blocks = 0
-    conditional_blocks = 0
-    action_blocks = 0
-    sensing_blocks = 0
-
-    for node in root.iter():
-        tag = node.tag.rsplit("}", 1)[-1]
-        block_type = node.attrib.get("type")
-        if not block_type or tag not in {"block", "shadow"}:
-            continue
-        is_shadow = tag == "shadow"
-        if not is_shadow:
-            total_non_shadow_blocks += 1
-
-        if block_type.startswith("pg_events_") and not is_shadow:
-            starter_blocks += 1
-
-        if block_type.startswith("pg_drivetrain_") or block_type.startswith("pg_actions_"):
-            if not is_shadow:
-                executable_blocks += 1
-            if block_type.startswith("pg_actions_") and not is_shadow:
-                action_blocks += 1
-
-        if block_type.startswith("pg_sensing_") and not is_shadow:
-            executable_blocks += 1
-            sensing_blocks += 1
-
-        if block_type.startswith("pg_control_") and not is_shadow:
-            structure_blocks += 1
-            if any(token in block_type for token in ("repeat", "forever", "while")):
-                loop_blocks += 1
-            if "if" in block_type:
-                conditional_blocks += 1
-
-    return WorkspaceSummary(
-        total_non_shadow_blocks=total_non_shadow_blocks,
-        starter_blocks=starter_blocks,
-        executable_blocks=executable_blocks,
-        structure_blocks=structure_blocks,
-        loop_blocks=loop_blocks,
-        conditional_blocks=conditional_blocks,
-        action_blocks=action_blocks,
-        sensing_blocks=sensing_blocks,
-    )
+def extract_playground_parameters(playground_data_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(playground_data_json, dict):
+        return {}
+    parameters = playground_data_json.get("parameters")
+    return parameters if isinstance(parameters, dict) else {}
 
 
-def compute_progress_pct(project_json: dict[str, Any] | None, playground: str) -> float:
-    summary = extract_workspace_summary(project_json)
-    targets = PLAYGROUND_TARGETS[playground]
+def compute_go_mars_progress_pct(playground_data_json: dict[str, Any] | None) -> float:
+    parameters = extract_playground_parameters(playground_data_json)
+    if not parameters:
+        return 0.0
 
     score = 0.0
-    if summary.starter_blocks > 0:
-        score += 10.0
-    score += min(summary.executable_blocks / targets["expected_executable_blocks"], 1.0) * 45.0
-    score += min(summary.structure_blocks / targets["expected_structure_blocks"], 1.0) * 25.0
-    score += min(summary.total_non_shadow_blocks / targets["expected_total_blocks"], 1.0) * 20.0
+    for metric_name, weight in GO_MARS_BOOLEAN_PROGRESS_WEIGHTS.items():
+        if parameters.get(metric_name) is True:
+            score += weight
+
+    for metric_name, weight in GO_MARS_COUNT_PROGRESS_WEIGHTS.items():
+        metric_value = parameters.get(metric_name)
+        if isinstance(metric_value, (int, float)) and metric_value > 0:
+            score += weight
+
     return round(min(score, 100.0), 2)
+
+
+def compute_progress_pct(playground_data_json: dict[str, Any] | None, playground: str) -> float:
+    if playground != "GO-Mars":
+        raise ValueError(
+            f"Playground-data progress is only configured for GO-Mars, got {playground}."
+        )
+    return compute_go_mars_progress_pct(playground_data_json)
 
 
 def compute_time_on_task_s(events: list[EventRecord]) -> float:
@@ -329,9 +273,9 @@ def compute_action_level(total_events: int, time_on_task_s: float) -> ActionLeve
 def build_progress_series(events: list[EventRecord], playground: str) -> list[tuple[datetime, float]]:
     series: list[tuple[datetime, float]] = []
     for event in events:
-        if event.project_json is None:
+        if event.playground_data_json is None:
             continue
-        series.append((event.event_ts, compute_progress_pct(event.project_json, playground)))
+        series.append((event.event_ts, compute_progress_pct(event.playground_data_json, playground)))
     return series
 
 
