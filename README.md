@@ -31,23 +31,3 @@ Then fetch the latest VEX logs and save them locally:
 Fetch and immediately parse + insert into Postgres:
 
 - `python server/src/fetch_invite_hub_logs.py --insert`
-
-Useful filters:
-
-- `python server/src/fetch_invite_hub_logs.py --student-id test_student`
-- `python server/src/fetch_invite_hub_logs.py --class-code VUUUFR --event-type blockMoved`
-- `python server/src/fetch_invite_hub_logs.py --date-from 2026-03-01T00:00 --date-to 2026-03-31T23:59`
-
-The fetcher defaults to the bulk download endpoint. If needed, you can fall back to paged API retrieval:
-
-- `python server/src/fetch_invite_hub_logs.py --method paged --page-size 500`
-
-To test incremental syncing, first seed the current newest upstream log ID:
-
-- `python server/src/fetch_invite_hub_logs.py --seed-head`
-
-Then later fetch only logs newer than that saved cursor:
-
-- `python server/src/fetch_invite_hub_logs.py --incremental`
-
-The incremental cursor is stored in `server/src/invite_hub_sync_state.json`.
