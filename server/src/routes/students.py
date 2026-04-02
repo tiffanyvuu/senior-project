@@ -8,6 +8,7 @@ from src.current_state_metrics import build_raw_logs_context, compute_snapshot_f
 from src.db import get_message_id_for_response, insert_message, insert_message_feedback
 from src.feedback_policy import FeedbackClass, determine_feedback_class
 from src.llm_service import generate_main_llm_response
+from src.log_sync import sync_invite_hub_logs
 from src.schemas import (
     FeedbackRequest,
     FeedbackResponse,
@@ -76,19 +77,14 @@ def create_response(
     llm_request = None
     response_text = payload.response_text
     feedback_classes = set()
+    synced_log_count = 0
     task = resolve_task_description(payload.playground)
     available_blocks = resolve_available_blocks(payload.playground)
-    raw_logs = build_raw_logs_context(
-        student_id=student_id,
-        session_id=payload.session_id,
-    )
-    recent_messages = get_recent_session_messages(
-        student_id,
-        payload.playground,
-        payload.session_id,
-    )
+    raw_logs = "None"
+    recent_messages: list[dict[str, str]] = []
     if task and payload.student_message:
         try:
+            synced_log_count = sync_invite_hub_logs()
             snapshot = compute_snapshot_for_student_session(
                 student_id=student_id,
                 session_id=payload.session_id,
@@ -103,15 +99,26 @@ def create_response(
             "Current State Analyzer Output",
             student_id=student_id,
             session_id=payload.session_id,
+            synced_log_count=synced_log_count,
             snapshot=snapshot.to_dict(),
         )
         feedback_classes = determine_feedback_class(snapshot)
         if not feedback_classes:
             feedback_classes = {FeedbackClass.QUESTION}
+        raw_logs = build_raw_logs_context(
+            student_id=student_id,
+            session_id=payload.session_id,
+        )
+        recent_messages = get_recent_session_messages(
+            student_id,
+            payload.playground,
+            payload.session_id,
+        )
         log_stage(
             "Feedback Policy Output",
             student_id=student_id,
             session_id=payload.session_id,
+            synced_log_count=synced_log_count,
             feedback_classes=sorted(
                 feedback_class.value for feedback_class in feedback_classes
             ),
