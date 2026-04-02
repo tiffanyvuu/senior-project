@@ -44,23 +44,30 @@ ALLOWED_PLAYGROUNDS = {
     "GOMARS": "GO-Mars",
 }
 
-GO_MARS_BOOLEAN_PROGRESS_WEIGHTS = {
-    "tilted_solarPanel": 15.0,
-    "cleared_debris_landingSite": 15.0,
-    "placed_helicopter_landingSite": 15.0,
-    "lifted_rocketShip_upright": 15.0,
-    "rover_rescued": 15.0,
-}
+GO_MARS_INITIAL_GOAL_SCORE = 5.0
 
-# Count-based GO-Mars metrics are treated as "progress made" once they are > 0
-# We can tighten these into fuller target-based normalization later if the exact maxima for each task become part of the scoring rubric.
-GO_MARS_COUNT_PROGRESS_WEIGHTS = {
-    "removed_samples_crater": 8.0,
-    "samples_moved_lab": 5.0,
-    "samples_moved_lab_top": 4.0,
-    "removed_fuel_cells_craters": 3.0,
-    "moved_fuel_cells_rocketShip": 3.0,
-    "moved_fuel_cells_landingSite": 2.0,
+GO_MARS_MILESTONE_RULES = {
+    "move_sample_out_of_crater": lambda parameters: (
+        isinstance(parameters.get("removed_samples_crater"), (int, float))
+        and parameters.get("removed_samples_crater", 0) > 0
+    ),
+    "place_sample_on_lab": lambda parameters: (
+        (
+            isinstance(parameters.get("samples_moved_lab"), (int, float))
+            and parameters.get("samples_moved_lab", 0) > 0
+        )
+        or (
+            isinstance(parameters.get("samples_moved_lab_top"), (int, float))
+            and parameters.get("samples_moved_lab_top", 0) > 0
+        )
+    ),
+    "tilt_solar_panel": lambda parameters: parameters.get("tilted_solarPanel") is True,
+    "move_hero_bot_out_of_crater": lambda parameters: parameters.get("rover_rescued") is True,
+    "lift_rocket_ship_upright": lambda parameters: parameters.get("lifted_rocketShip_upright") is True,
+    "remove_fuel_cells_from_cradles": lambda parameters: (
+        isinstance(parameters.get("removed_fuel_cells_craters"), (int, float))
+        and parameters.get("removed_fuel_cells_craters", 0) > 0
+    ),
 }
 
 ACTION_LEVEL_THRESHOLDS = {
@@ -229,22 +236,33 @@ def extract_playground_parameters(playground_data_json: dict[str, Any] | None) -
     return parameters if isinstance(parameters, dict) else {}
 
 
+def compute_go_mars_milestone_progress_pct(parameters: dict[str, Any]) -> float:
+    completed_milestones = sum(
+        1 for rule in GO_MARS_MILESTONE_RULES.values() if rule(parameters)
+    )
+    return round(
+        min(completed_milestones, GO_MARS_INITIAL_GOAL_SCORE)
+        / GO_MARS_INITIAL_GOAL_SCORE
+        * 100.0,
+        2,
+    )
+
+
 def compute_go_mars_progress_pct(playground_data_json: dict[str, Any] | None) -> float:
     parameters = extract_playground_parameters(playground_data_json)
     if not parameters:
         return 0.0
 
-    score = 0.0
-    for metric_name, weight in GO_MARS_BOOLEAN_PROGRESS_WEIGHTS.items():
-        if parameters.get(metric_name) is True:
-            score += weight
+    total_score = parameters.get("total_score")
+    if isinstance(total_score, (int, float)):
+        return round(
+            min(float(total_score), GO_MARS_INITIAL_GOAL_SCORE)
+            / GO_MARS_INITIAL_GOAL_SCORE
+            * 100.0,
+            2,
+        )
 
-    for metric_name, weight in GO_MARS_COUNT_PROGRESS_WEIGHTS.items():
-        metric_value = parameters.get(metric_name)
-        if isinstance(metric_value, (int, float)) and metric_value > 0:
-            score += weight
-
-    return round(min(score, 100.0), 2)
+    return compute_go_mars_milestone_progress_pct(parameters)
 
 
 def compute_progress_pct(playground_data_json: dict[str, Any] | None, playground: str) -> float:
