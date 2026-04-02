@@ -19,12 +19,17 @@
   "
 ```
 
-Inserting Logs:
+## Inserting Logs:
 ```
   for f in tests/fixtures/raw_logs/*.ndjson; do
     python3 src/parse_event_logs.py --input \"$f\" --insert
   done
 ```
+
+## Input Fields on UI
+- StudentID
+- "GO-Mars"
+- SessionID
 
 ## Fixtures:
 

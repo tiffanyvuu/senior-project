@@ -207,6 +207,38 @@ button {
   margin: 0 0 0.45rem;
 }
 
+.message-body-wrap {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.message-body {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.message-list-block {
+  margin: 0 0 0 1.15rem;
+  padding: 0;
+}
+
+.message-list-block li + li {
+  margin-top: 0.3rem;
+}
+
+.message-body code,
+.message-list-block code {
+  display: inline-block;
+  padding: 0.12rem 0.38rem;
+  border-radius: 4px;
+  background: rgba(8, 117, 226, 0.14);
+  border: 1px solid rgba(8, 117, 226, 0.2);
+  color: #12365c;
+  font-family: "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.9em;
+  font-weight: 700;
+}
+
 .message-meta {
   display: block;
   font-size: 0.78rem;

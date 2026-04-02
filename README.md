@@ -1,5 +1,15 @@
 # Pedagogial AI Agent
 
+## Running Client and Server
+1. Client:
+   - `cd client`
+   - `npm install`
+   - `npm run dev`
+2. Server:
+   - `cd server`
+   - `source .venv/bin/activate`
+   - `uvicorn src.app:app --reload --log-level info`
+
 ## Local DB Setup (Team Workflow)
 
 Use local Postgres per team member, and apply the same migration files.
@@ -15,6 +25,8 @@ Use local Postgres per team member, and apply the same migration files.
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/001_create_parsed_events.sql"`
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/002_create_state_snapshots.sql"`
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/003_add_playground_data_to_parsed_events.sql"`
+   - `psql "$env:DATABASE_URL" -f "server/db/migrations/004_create_messages.sql"`
+   - `psql "$env:DATABASE_URL" -f "server/db/migrations/005_create_message_feedback.sql"`
 5. Load parsed logs:
    - `python server/src/parse_event_logs.py --insert`
 
@@ -33,3 +45,7 @@ Then fetch the latest VEX logs and save them locally:
 Fetch and immediately parse + insert into Postgres:
 
 - `python server/src/fetch_invite_hub_logs.py --insert`
+
+## Navigator
+- Go to https://docs.rc.ufl.edu/training/NaviGator_Toolkit/ and follow instructions to set up API key.
+- Insert your API key in server/navigator_api_keys.example.json.
