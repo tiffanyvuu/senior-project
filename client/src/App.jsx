@@ -108,11 +108,8 @@ function renderMessageBody(text) {
 
 function App() {
   const [studentIdDraft, setStudentIdDraft] = useState("");
-  const [playgroundDraft, setPlaygroundDraft] = useState("");
-  const [sessionIdDraft, setSessionIdDraft] = useState("");
   const [studentId, setStudentId] = useState("");
-  const [playground, setPlayground] = useState("");
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = useState("Detecting latest session");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(starterMessages);
   const [pendingAction, setPendingAction] = useState("");
@@ -220,14 +217,11 @@ function App() {
   const handleStudentStart = (event) => {
     event.preventDefault();
     const trimmedStudentId = studentIdDraft.trim();
-    const trimmedPlayground = playgroundDraft.trim();
-    const trimmedSessionId = sessionIdDraft.trim();
-    if (!trimmedStudentId || !trimmedPlayground || !trimmedSessionId) {
+    if (!trimmedStudentId) {
       return;
     }
     setStudentId(trimmedStudentId);
-    setPlayground(trimmedPlayground);
-    setSessionId(trimmedSessionId);
+    setSessionId("Detecting latest session");
   };
 
   const handleSend = async (event) => {
@@ -251,16 +245,15 @@ function App() {
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
-        session_id: sessionId,
         message: trimmedDraft,
-        playground,
       });
+      setSessionId(messageResponse.session_id);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        session_id: sessionId,
-        playground,
+        session_id: messageResponse.session_id,
         student_message: trimmedDraft,
       });
+      setSessionId(responseRecord.session_id);
       setMessages((current) =>
         [
           ...current.map((message) =>
@@ -309,16 +302,15 @@ function App() {
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
-        session_id: sessionId,
         message: "",
-        playground,
       });
+      setSessionId(messageResponse.session_id);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        session_id: sessionId,
-        playground,
+        session_id: messageResponse.session_id,
         student_message: "Help",
       });
+      setSessionId(responseRecord.session_id);
       setMessages((current) =>
         [
           ...current.map((message) =>
@@ -367,7 +359,7 @@ function App() {
       <main className="app-shell">
         <section className="start-card">
           <h1>Start Chat</h1>
-          <p>Enter your student ID, playground, and session ID before starting the chat.</p>
+          <p>Enter your student ID before starting the chat.</p>
           <form className="start-form" onSubmit={handleStudentStart}>
             <label className="sr-only" htmlFor="student-id">
               Student ID
@@ -378,28 +370,6 @@ function App() {
               value={studentIdDraft}
               onChange={(event) => setStudentIdDraft(event.target.value)}
               placeholder="Student ID"
-              autoComplete="off"
-            />
-            <label className="sr-only" htmlFor="playground">
-              Playground
-            </label>
-            <input
-              id="playground"
-              type="text"
-              value={playgroundDraft}
-              onChange={(event) => setPlaygroundDraft(event.target.value)}
-              placeholder="Playground"
-              autoComplete="off"
-            />
-            <label className="sr-only" htmlFor="session-id">
-              Session ID
-            </label>
-            <input
-              id="session-id"
-              type="text"
-              value={sessionIdDraft}
-              onChange={(event) => setSessionIdDraft(event.target.value)}
-              placeholder="Session ID (UUID)"
               autoComplete="off"
             />
             <button type="submit">Start Chat</button>
@@ -415,7 +385,7 @@ function App() {
         <header className="toolbar">
           <div className="toolbar-copy">
             <h1>Chat</h1>
-            <p>{studentId} · {playground} · {sessionId}</p>
+            <p>{studentId} · GO-Mars · {sessionId}</p>
           </div>
           <button
             type="button"
