@@ -3,7 +3,8 @@ Feedback Policy
 """
 
 from enum import Enum
-from dataclasses import dataclass
+
+from src.current_state_metrics import CurrentStateSnapshot
 
 class FeedbackClass(Enum):
     # Acknowledge / Notify
@@ -28,70 +29,53 @@ class FeedbackClass(Enum):
     REPEAT = "Repeat"
     NEXT_STEP = "Next Step"
 
-@dataclass
-class FeedbackClassInput:
-    # Cognition categories (alpha)
-    long_term_stalled_progress: bool = False
-    development_increases_progress: bool = False
-    development_static_progress: bool = False
-    development_decreases_progress: bool = False
-
-    # Cognition categories
-    trial_and_error: bool = False
-    code_abandonment: bool = False
-    step_by_step_elimination: bool = False
-    snap_n_test: bool = False
-
-    # Persistence categories
-    expected_completion: bool = False
-    high_persister: bool = False
-    early_quitter: bool = False
-
-def determine_feedback_class(x: FeedbackClassInput) -> set[FeedbackClass]:
+def determine_feedback_class(snapshot: CurrentStateSnapshot) -> set[FeedbackClass]:
     feedback_classes = set()
+    cognition = snapshot.cognition.value
+    persistence = snapshot.persistence.value
 
     # Long-term stalled progress -> Help out -> c.i
-    if x.long_term_stalled_progress:
+    if cognition == "LONG_TERM_STALLED_PROGRESS":
         feedback_classes.add(FeedbackClass.ERROR_FLAGGING)
 
     # Development increases progress -> Reflection/Rehearsal -> c.viii
-    if x.development_increases_progress:
+    if cognition == "DEVELOPMENT_INCREASES_PROGRESS":
         feedback_classes.add(FeedbackClass.ELABORATE)
 
     # Development for static progress -> Motivate to keep persisting -> b.ii
-    if x.development_static_progress:
+    if cognition == "DEVELOPMENT_STATIC_PROGRESS":
         feedback_classes.add(FeedbackClass.REASSURE)
 
     # Development decreases progress -> Corrective explanation -> c.iii
-    if x.development_decreases_progress:
+    if cognition == "DEVELOPMENT_DECREASES_PROGRESS":
         feedback_classes.add(FeedbackClass.INFORM)
 
     # Trial & Error -> a.ii
-    if x.trial_and_error:
+    if cognition == "TRIAL_AND_ERROR":
         feedback_classes.add(FeedbackClass.PARTIAL_CORRECTNESS)
         
         # -> b.i
-        if x.expected_completion:
+        if persistence == "EXPECTED_COMPLETION":
             feedback_classes.add(FeedbackClass.EVIDENCE_BASED_PRAISE)
 
         # -> b.ii
-        if x.high_persister:
+        if persistence == "HIGH_PERSISTER":
             feedback_classes.add(FeedbackClass.REASSURE)
 
         # -> c.ii
-        if x.early_quitter:
+        if persistence == "EARLY_QUITTER":
             feedback_classes.add(FeedbackClass.HOW_TO)
 
     # Code abandonment
-    if x.code_abandonment:
+    if cognition == "CODE_ABANDONMENT":
 
         # -> c.v
-        if x.expected_completion or x.early_quitter:
+        if persistence in {"EXPECTED_COMPLETION", "EARLY_QUITTER"}:
             feedback_classes.add(FeedbackClass.DIAGNOSE)
 
         # TO DO: always reassure, first two times elaborate, after fill in the blank
         # -> b.ii, c.vii, c.viii
-        if x.high_persister:
+        if persistence == "HIGH_PERSISTER":
             feedback_classes.update({
                 FeedbackClass.REASSURE,
                 # FeedbackClass.FILL_IN_THE_BLANK,
@@ -99,22 +83,11 @@ def determine_feedback_class(x: FeedbackClassInput) -> set[FeedbackClass]:
             })
 
     # Step-by-step elimination -> c.iv
-    if x.step_by_step_elimination:
+    if cognition == "STEP_BY_STEP_ELIMINATION":
         feedback_classes.add(FeedbackClass.NUDGE)
 
     # Snap'n test -> c.ii
-    if x.snap_n_test:
+    if cognition == "SNAP_N_TEST":
         feedback_classes.add(FeedbackClass.INFORM)
 
     return feedback_classes
-
-
-if __name__ == "__main__":
-    x = FeedbackClassInput(
-        # Categories determined by Current State Analyzer
-        code_abandonment=True,
-        early_quitter=True
-    )
-
-    feedback_classes = determine_feedback_class(x)
-    print("Feedback class:", [fc.value for fc in feedback_classes])

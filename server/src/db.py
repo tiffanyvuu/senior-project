@@ -26,7 +26,7 @@ def insert_message(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO event_logs.messages (
+                INSERT INTO chat.messages (
                     session_id,
                     student_id,
                     role,
@@ -58,7 +58,7 @@ def insert_message_feedback(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO event_logs.message_feedback (
+                INSERT INTO chat.message_feedback (
                     message_id,
                     student_id,
                     thumb,
@@ -76,7 +76,7 @@ def get_message_id_for_response(*, response_id: UUID, student_id: str) -> int | 
             cur.execute(
                 """
                 SELECT id
-                FROM event_logs.messages
+                FROM chat.messages
                 WHERE response_id = %s
                   AND student_id = %s
                   AND role = 'assistant'

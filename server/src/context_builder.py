@@ -177,7 +177,7 @@ FEEDBACK_CLASS_TO_SPEC_KEY = {
     FeedbackClass.NEXT_STEP: "Next Step",
 }
 
-PROMPT_TEMPLATE = """You are an educational feedback assistant for VEXcode VR.
+PROMPT_TEMPLATE = """You are an educational feedback assistant for VEXcode VR, a block-based programming tool.
 
 Task:
 {task}
@@ -187,6 +187,9 @@ Available blocks:
 
 Student message:
 {student_message}
+
+Raw logs for this student and session:
+{raw_logs}
 
 Recent chat in this session:
 {recent_chat}
@@ -227,12 +230,15 @@ Requirements:
 - Use all feedback types in a cohesive way (do not output separate messages).
 - Be concise and specific.
 - Do not invent details beyond the task and student message.
+- When referring to a specific block, wrap only the block name in backticks.
+- When mentioning a block, preserve the exact capitalization and wording from the Available blocks list.
 """
 
 def build_feedback_prompt(
     task: str,
     student_message: str,
     available_blocks: str,
+    raw_logs: str,
     recent_chat: str,
     feedback_types: list[str],
     feedback_specs: dict,
@@ -258,6 +264,7 @@ def build_feedback_prompt(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks,
+        raw_logs=raw_logs,
         recent_chat=recent_chat,
         feedback_types=feedback_types_text,
         descriptions=descriptions_text,
@@ -270,6 +277,7 @@ def build_feedback_prompt_from_classes(
     task: str,
     student_message: str,
     available_blocks: list[str] | None,
+    raw_logs: str,
     recent_messages: list[dict[str, str]],
     feedback_classes: set[FeedbackClass],
 ) -> str:
@@ -294,23 +302,8 @@ def build_feedback_prompt_from_classes(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks_text,
+        raw_logs=raw_logs,
         recent_chat=recent_chat,
         feedback_types=feedback_types,
         feedback_specs=FEEDBACK_SPECS,
     )
-
-if __name__ == "__main__":
-    task = "Have the robot drive forward to pick up all trash without falling off the cliff."
-
-    feedback_types = ["Error Flagging", "How To"]
-
-    prompt = build_feedback_prompt(
-        task=task,
-        student_message="Why does my robot keep driving forever?",
-        available_blocks="None provided",
-        recent_chat="None",
-        feedback_types=feedback_types,
-        feedback_specs=FEEDBACK_SPECS,
-    )
-
-    print(prompt)

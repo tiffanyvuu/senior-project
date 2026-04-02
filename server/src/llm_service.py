@@ -12,6 +12,7 @@ def prepare_main_llm_request(
     task: str,
     student_message: str,
     available_blocks: list[str] | None,
+    raw_logs: str,
     recent_messages: list[dict[str, str]],
     feedback_classes: set[FeedbackClass],
 ) -> dict[str, str]:
@@ -19,6 +20,7 @@ def prepare_main_llm_request(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks,
+        raw_logs=raw_logs,
         recent_messages=recent_messages,
         feedback_classes=feedback_classes,
     )
@@ -45,6 +47,7 @@ def generate_main_llm_response(
     task: str,
     student_message: str,
     available_blocks: list[str] | None,
+    raw_logs: str,
     recent_messages: list[dict[str, str]],
     feedback_classes: set[FeedbackClass],
 ) -> dict[str, str]:
@@ -52,6 +55,7 @@ def generate_main_llm_response(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks,
+        raw_logs=raw_logs,
         recent_messages=recent_messages,
         feedback_classes=feedback_classes,
     )
