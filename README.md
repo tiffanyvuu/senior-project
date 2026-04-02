@@ -15,6 +15,7 @@ Use local Postgres per team member, and apply the same migration files.
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/001_create_parsed_events.sql"`
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/002_create_state_snapshots.sql"`
    - `psql "$env:DATABASE_URL" -f "server/db/migrations/003_add_playground_data_to_parsed_events.sql"`
+   - `psql "$env:DATABASE_URL" -f "server/db/migrations/004_create_chat_messages.sql"`
 5. Load parsed logs:
    - `python server/src/parse_event_logs.py --insert`
 
