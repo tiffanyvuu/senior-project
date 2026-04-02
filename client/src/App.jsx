@@ -13,7 +13,106 @@ const starterMessages = [
   },
 ];
 
+function renderInlineMarkdown(text) {
+  const parts = [];
+  const pattern = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**") || token.startsWith("__")) {
+      parts.push(<strong key={`${match.index}-strong`}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("`")) {
+      parts.push(<code key={`${match.index}-code`}>{token.slice(1, -1)}</code>);
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts;
+}
+
+function renderMessageBody(text) {
+  if (typeof text !== "string") {
+    return text;
+  }
+
+  const lines = text.split("\n");
+  const elements = [];
+  let listItems = [];
+  let listType = null;
+
+  const flushList = (key) => {
+    if (!listItems.length) {
+      return;
+    }
+
+    const Tag = listType === "ol" ? "ol" : "ul";
+    elements.push(<Tag key={key} className="message-list-block">{listItems}</Tag>);
+    listItems = [];
+    listType = null;
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
+    const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+
+    if (!trimmed) {
+      flushList(`list-${index}`);
+      return;
+    }
+
+    if (unorderedMatch) {
+      if (listType && listType !== "ul") {
+        flushList(`list-${index}`);
+      }
+      listType = "ul";
+      listItems.push(
+        <li key={`li-${index}`}>{renderInlineMarkdown(unorderedMatch[1])}</li>,
+      );
+      return;
+    }
+
+    if (orderedMatch) {
+      if (listType && listType !== "ol") {
+        flushList(`list-${index}`);
+      }
+      listType = "ol";
+      listItems.push(
+        <li key={`li-${index}`}>{renderInlineMarkdown(orderedMatch[1])}</li>,
+      );
+      return;
+    }
+
+    flushList(`list-${index}`);
+    elements.push(
+      <p key={`p-${index}`} className="message-body">
+        {renderInlineMarkdown(line)}
+      </p>,
+    );
+  });
+
+  flushList("list-final");
+  return elements;
+}
+
 function App() {
+  const [studentIdDraft, setStudentIdDraft] = useState("");
+  const [playgroundDraft, setPlaygroundDraft] = useState("");
+  const [sessionIdDraft, setSessionIdDraft] = useState("");
+  const [studentId, setStudentId] = useState("");
+  const [playground, setPlayground] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(starterMessages);
   const [pendingAction, setPendingAction] = useState("");
@@ -21,18 +120,9 @@ function App() {
   const [openReviews, setOpenReviews] = useState({});
   const [pendingFeedback, setPendingFeedback] = useState({});
   const apiBase = defaultApiBase;
-  const studentId = "student-1";
 
   const appendMessage = (message) => {
     setMessages((current) => [...current, message]);
-  };
-
-  const buildTemporaryReply = (messageText) => {
-    if (!messageText.trim()) {
-      return "Think about if your while loop condition ever becomes false.";
-    }
-
-    return "Think about if your while loop condition ever becomes false.";
   };
 
   const postJson = async (path, payload) => {
@@ -127,6 +217,19 @@ function App() {
     }
   };
 
+  const handleStudentStart = (event) => {
+    event.preventDefault();
+    const trimmedStudentId = studentIdDraft.trim();
+    const trimmedPlayground = playgroundDraft.trim();
+    const trimmedSessionId = sessionIdDraft.trim();
+    if (!trimmedStudentId || !trimmedPlayground || !trimmedSessionId) {
+      return;
+    }
+    setStudentId(trimmedStudentId);
+    setPlayground(trimmedPlayground);
+    setSessionId(trimmedSessionId);
+  };
+
   const handleSend = async (event) => {
     event.preventDefault();
 
@@ -148,12 +251,15 @@ function App() {
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
+        session_id: sessionId,
         message: trimmedDraft,
+        playground,
       });
-      const responseText = buildTemporaryReply(trimmedDraft);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text: responseText,
+        session_id: sessionId,
+        playground,
+        student_message: trimmedDraft,
       });
       setMessages((current) =>
         [
@@ -169,7 +275,7 @@ function App() {
             id: responseRecord.response_id,
             role: "assistant",
             body: responseRecord.response_text,
-            meta: "Temporary test reply",
+            meta: responseRecord.llm_model || "Generated response",
             canFeedback: true,
           },
         ],
@@ -191,35 +297,117 @@ function App() {
   };
 
   const handleHelp = async () => {
+    const helpMessage = {
+      id: crypto.randomUUID(),
+      role: "student",
+      body: "Help",
+      meta: "Sending",
+    };
+
+    appendMessage(helpMessage);
     setPendingAction("help");
 
     try {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
+        session_id: sessionId,
         message: "",
+        playground,
       });
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text:
-          "Think about if your while loop condition ever becomes false.",
+        session_id: sessionId,
+        playground,
+        student_message: "Help",
       });
-      appendMessage({
-        id: responseRecord.response_id,
-        role: "assistant",
-        body: responseRecord.response_text,
-        meta: "Temporary test reply",
-        canFeedback: true,
-      });
+      setMessages((current) =>
+        [
+          ...current.map((message) =>
+            message.id === helpMessage.id
+              ? {
+                  ...message,
+                  meta: "Sent",
+                }
+              : message,
+          ),
+          {
+            id: responseRecord.response_id,
+            role: "assistant",
+            body: responseRecord.response_text,
+            meta: responseRecord.llm_model || "Generated response",
+            canFeedback: true,
+          },
+        ],
+      );
     } catch (error) {
-      appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        body: "Help could not be sent right now.",
-        meta: `Failed to send: ${error.message}`,
-      });
+      setMessages((current) =>
+        [
+          ...current.map((message) =>
+            message.id === helpMessage.id
+              ? {
+                  ...message,
+                  meta: `Failed to send: ${error.message}`,
+                }
+              : message,
+          ),
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            body: "Help could not be sent right now.",
+            meta: `Failed to send: ${error.message}`,
+          },
+        ],
+      );
     } finally {
       setPendingAction("");
     }
   };
+
+  if (!studentId) {
+    return (
+      <main className="app-shell">
+        <section className="start-card">
+          <h1>Start Chat</h1>
+          <p>Enter your student ID, playground, and session ID before starting the chat.</p>
+          <form className="start-form" onSubmit={handleStudentStart}>
+            <label className="sr-only" htmlFor="student-id">
+              Student ID
+            </label>
+            <input
+              id="student-id"
+              type="text"
+              value={studentIdDraft}
+              onChange={(event) => setStudentIdDraft(event.target.value)}
+              placeholder="Student ID"
+              autoComplete="off"
+            />
+            <label className="sr-only" htmlFor="playground">
+              Playground
+            </label>
+            <input
+              id="playground"
+              type="text"
+              value={playgroundDraft}
+              onChange={(event) => setPlaygroundDraft(event.target.value)}
+              placeholder="Playground"
+              autoComplete="off"
+            />
+            <label className="sr-only" htmlFor="session-id">
+              Session ID
+            </label>
+            <input
+              id="session-id"
+              type="text"
+              value={sessionIdDraft}
+              onChange={(event) => setSessionIdDraft(event.target.value)}
+              placeholder="Session ID (UUID)"
+              autoComplete="off"
+            />
+            <button type="submit">Start Chat</button>
+          </form>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -227,7 +415,7 @@ function App() {
         <header className="toolbar">
           <div className="toolbar-copy">
             <h1>Chat</h1>
-            <p>Ask a question or press Help.</p>
+            <p>{studentId} · {playground} · {sessionId}</p>
           </div>
           <button
             type="button"
@@ -250,7 +438,7 @@ function App() {
                   <div className="message-label">
                     {message.role === "student" ? "You" : "Agent"}
                   </div>
-                  <p>{message.body}</p>
+                  <div className="message-body-wrap">{renderMessageBody(message.body)}</div>
                   <span className="message-meta">{message.meta}</span>
                   {message.role === "assistant" && message.canFeedback ? (
                     <div className="feedback-panel">

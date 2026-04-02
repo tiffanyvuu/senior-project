@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,9 @@ from typing import Any
 from psycopg.types.json import Json
 
 from db import get_conn
+
+
+_last_skip_summary: dict[str, int] = {}
 
 
 def parse_iso_timestamp(value: Any) -> str | None:
@@ -100,11 +104,34 @@ def build_parsed_event(raw_record: dict[str, Any], source: str) -> dict[str, Any
 
 def parse_records(records: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
     parsed_rows: list[dict[str, Any]] = []
+    skipped_reasons: dict[str, int] = {}
     for index, record in enumerate(records, start=1):
         if not isinstance(record, dict):
             raise ValueError(f"Record {index} from {source} is not an object")
-        parsed_rows.append(build_parsed_event(record, source))
+        try:
+            parsed_rows.append(build_parsed_event(record, source))
+        except ValueError as error:
+            reason = str(error)
+            skipped_reasons[reason] = skipped_reasons.get(reason, 0) + 1
+
+    global _last_skip_summary
+    _last_skip_summary = skipped_reasons
+    if skipped_reasons:
+        skipped_count = sum(skipped_reasons.values())
+        print(
+            f"Skipped {skipped_count} malformed records from {source}.",
+            file=sys.stderr,
+        )
+        for reason, count in sorted(
+            skipped_reasons.items(),
+            key=lambda item: (-item[1], item[0]),
+        ):
+            print(f"- {count}x {reason}", file=sys.stderr)
     return parsed_rows
+
+
+def get_last_skip_summary() -> dict[str, int]:
+    return dict(_last_skip_summary)
 
 
 def parse_ndjson_text(text: str, source: str) -> list[dict[str, Any]]:

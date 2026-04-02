@@ -4,12 +4,16 @@ from pydantic import BaseModel, Field
 
 
 class MessageRequest(BaseModel):
+    session_id: str = Field(description="Session identifier for the current chat session.")
     message: str = Field(default="", description="Student message text.")
+    playground: str = Field(description="Task/playground identifier for the current activity.")
 
 
 class MessageResponse(BaseModel):
     message_id: str
+    session_id: str
     student_id: str
+    playground: str
     message: str
     source: Literal["chat", "help_button"]
     status: Literal["received"]
@@ -20,14 +24,27 @@ class StudentResponseRequest(BaseModel):
         default=None,
         description="Associated inbound message identifier, if available.",
     )
-    response_text: str = Field(description="LLM-generated text shown to the student.")
+    session_id: str = Field(description="Session identifier for the current chat session.")
+    playground: str = Field(description="Task/playground identifier for the current activity.")
+    response_text: str | None = Field(
+        default=None,
+        description="LLM-generated text shown to the student.",
+    )
+    student_message: str | None = Field(
+        default=None,
+        description="Raw student chat message to include in the main LLM prompt.",
+    )
 
 
 class StudentResponseResponse(BaseModel):
     response_id: str
+    session_id: str
     student_id: str
+    playground: str
     message_id: str | None
     response_text: str
+    llm_model: str | None = None
+    llm_prompt: str | None = None
     status: Literal["received"]
 
 

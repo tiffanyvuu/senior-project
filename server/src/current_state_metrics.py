@@ -173,7 +173,7 @@ def to_event_record(row: dict[str, Any]) -> EventRecord:
 def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
     from psycopg.rows import dict_row
 
-    from db import get_conn
+    from src.db import get_conn
 
     sql = """
     SELECT
@@ -198,6 +198,35 @@ def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
             rows = cur.fetchall()
     events = [to_event_record(dict(row)) for row in rows]
     return [event for event in events if event.playground is not None]
+
+
+def build_raw_logs_context(
+    student_id: str,
+    session_id: str,
+    *,
+    limit: int = 50,
+) -> str:
+    events = fetch_events_from_db(student_id=student_id, session_id=session_id)
+    if not events:
+        return "None"
+
+    selected_events = events[-limit:]
+    lines: list[str] = []
+    for event in selected_events:
+        lines.append(
+            json.dumps(
+                {
+                    "event_ts": event.event_ts.isoformat(),
+                    "event_type": event.event_type,
+                    "playground": event.playground,
+                    "block_event_data": event.block_event_data_json,
+                    "playground_data": event.playground_data_json,
+                    "error_message": event.error_message,
+                },
+                ensure_ascii=True,
+            )
+        )
+    return "\n".join(lines)
 
 
 def select_current_playground_segment(events: list[EventRecord]) -> tuple[str, list[EventRecord]]:
@@ -461,7 +490,7 @@ def analyze_current_state(events: list[EventRecord]) -> CurrentStateSnapshot:
 
 
 def upsert_snapshot(snapshot: CurrentStateSnapshot) -> None:
-    from db import get_conn
+    from src.db import get_conn
 
     sql = """
     INSERT INTO current_state.state_snapshots (
@@ -508,6 +537,19 @@ def upsert_snapshot(snapshot: CurrentStateSnapshot) -> None:
             cur.execute(sql, payload)
 
 
+def compute_snapshot_for_student_session(
+    student_id: str,
+    session_id: str,
+    *,
+    insert: bool = True,
+) -> CurrentStateSnapshot:
+    events = fetch_events_from_db(student_id=student_id, session_id=session_id)
+    snapshot = analyze_current_state(events)
+    if insert:
+        upsert_snapshot(snapshot)
+    return snapshot
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute a current-state snapshot for a student/session.")
     parser.add_argument("--student-id", required=True, help="Student ID to analyze")
@@ -519,10 +561,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    events = fetch_events_from_db(args.student_id, args.session_id)
-    snapshot = analyze_current_state(events)
-    if args.insert:
-        upsert_snapshot(snapshot)
+    snapshot = compute_snapshot_for_student_session(
+        student_id=args.student_id,
+        session_id=args.session_id,
+        insert=args.insert,
+    )
     print(json.dumps(snapshot.to_dict(), indent=2))
 
 

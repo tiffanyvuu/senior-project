@@ -20,7 +20,8 @@ body {
 }
 
 button,
-textarea {
+textarea,
+input {
   font: inherit;
 }
 
@@ -43,6 +44,55 @@ button {
   border-radius: 8px;
   box-shadow: 0 16px 32px rgba(33, 66, 102, 0.14);
   overflow: hidden;
+}
+
+.start-card {
+  width: min(420px, 100%);
+  margin: 8rem auto 0;
+  padding: 1.25rem;
+  background: rgba(246, 250, 255, 0.9);
+  border: 1px solid rgba(82, 133, 186, 0.38);
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(33, 66, 102, 0.14);
+}
+
+.start-card h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.35rem;
+}
+
+.start-card p {
+  margin: 0 0 1rem;
+  color: #406584;
+}
+
+.start-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.start-form input {
+  width: 100%;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(120, 164, 204, 0.45);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #23364a;
+  outline: none;
+}
+
+.start-form input:focus {
+  border-color: #4297d1;
+  box-shadow: 0 0 0 3px rgba(66, 151, 209, 0.15);
+}
+
+.start-form button {
+  justify-self: flex-end;
+  padding: 0.8rem 1.2rem;
+  border-radius: 4px;
+  background: rgb(8, 117, 226);
+  color: #ffffff;
+  font-weight: 700;
 }
 
 .toolbar {
@@ -155,6 +205,38 @@ button {
 
 .message-bubble p {
   margin: 0 0 0.45rem;
+}
+
+.message-body-wrap {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.message-body {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.message-list-block {
+  margin: 0 0 0 1.15rem;
+  padding: 0;
+}
+
+.message-list-block li + li {
+  margin-top: 0.3rem;
+}
+
+.message-body code,
+.message-list-block code {
+  display: inline-block;
+  padding: 0.12rem 0.38rem;
+  border-radius: 4px;
+  background: rgba(8, 117, 226, 0.14);
+  border: 1px solid rgba(8, 117, 226, 0.2);
+  color: #12365c;
+  font-family: "SFMono-Regular", "Consolas", monospace;
+  font-size: 0.9em;
+  font-weight: 700;
 }
 
 .message-meta {

@@ -6,6 +6,7 @@
 .env
 .env.*
 !.env.example
+server/navigator_api_keys.json
 
 # Python
 __pycache__/
