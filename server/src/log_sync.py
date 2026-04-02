@@ -3,22 +3,37 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from src.fetch_invite_hub_logs import (
-    DEFAULT_BASE_URL,
-    DEFAULT_PAGE_SIZE,
-    DEFAULT_STATE_PATH,
-    build_query_string,
-    fetch_vex_logs_incremental,
-    get_auth_token,
-    load_local_env,
-    parse_source_log_id,
-    read_sync_state,
-    write_sync_state,
-)
-from src.parse_event_logs import insert_rows, parse_records
+try:
+    from src.fetch_invite_hub_logs import (
+        DEFAULT_BASE_URL,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_STATE_PATH,
+        build_query_string,
+        fetch_vex_logs_incremental,
+        get_auth_token,
+        load_local_env,
+        parse_source_log_id,
+        read_sync_state,
+        write_sync_state,
+    )
+    from src.parse_event_logs import insert_rows, parse_records
+except ModuleNotFoundError:
+    from server.src.fetch_invite_hub_logs import (
+        DEFAULT_BASE_URL,
+        DEFAULT_PAGE_SIZE,
+        DEFAULT_STATE_PATH,
+        build_query_string,
+        fetch_vex_logs_incremental,
+        get_auth_token,
+        load_local_env,
+        parse_source_log_id,
+        read_sync_state,
+        write_sync_state,
+    )
+    from server.src.parse_event_logs import insert_rows, parse_records
 
 
-def sync_invite_hub_logs() -> int:
+def sync_invite_hub_logs(*, student_id: str | None = None) -> int:
     load_local_env()
     base_url = os.getenv("INVITE_HUB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     token = get_auth_token(base_url)
@@ -31,7 +46,7 @@ def sync_invite_hub_logs() -> int:
     raw_records = fetch_vex_logs_incremental(
         base_url,
         token,
-        build_query_string(),
+        build_query_string(student_id=student_id),
         page_size=DEFAULT_PAGE_SIZE,
         last_source_log_id=last_source_log_id,
     )

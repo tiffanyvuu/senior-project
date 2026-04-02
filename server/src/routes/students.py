@@ -84,7 +84,7 @@ def create_response(
     recent_messages: list[dict[str, str]] = []
     if task and payload.student_message:
         try:
-            synced_log_count = sync_invite_hub_logs()
+            synced_log_count = sync_invite_hub_logs(student_id=student_id)
             snapshot = compute_snapshot_for_student_session(
                 student_id=student_id,
                 session_id=payload.session_id,
@@ -126,6 +126,15 @@ def create_response(
 
     if task and payload.student_message and feedback_classes:
         try:
+            log_stage(
+                "LLM Request Starting",
+                student_id=student_id,
+                session_id=payload.session_id,
+                model=task,
+                feedback_classes=sorted(
+                    feedback_class.value for feedback_class in feedback_classes
+                ),
+            )
             llm_request = generate_main_llm_response(
                 task=task,
                 student_message=payload.student_message,

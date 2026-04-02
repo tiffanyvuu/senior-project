@@ -76,6 +76,7 @@ def request_bytes(
     payload: dict[str, Any] | None = None,
     accept: str = "application/json",
 ) -> bytes:
+    print(f"[fetch_invite_hub_logs] {method} {url}", flush=True)
     headers = {
         "Accept": accept,
         "User-Agent": "senior-project-log-fetcher/1.0",
@@ -117,6 +118,7 @@ def request_json(
 def get_auth_token(base_url: str) -> str:
     env_token = os.getenv("INVITE_HUB_TOKEN")
     if env_token:
+        print("[fetch_invite_hub_logs] Using INVITE_HUB_TOKEN from environment.", flush=True)
         return env_token
 
     username = os.getenv("INVITE_HUB_USERNAME")
@@ -238,8 +240,16 @@ def fetch_vex_logs_incremental(
 ) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     offset = 0
+    seen_ids: set[int] = set()
 
     while True:
+        print(
+            "[fetch_invite_hub_logs] Fetching incremental page",
+            f"offset={offset}",
+            f"page_size={page_size}",
+            f"last_source_log_id={last_source_log_id}",
+            flush=True,
+        )
         page_query = build_query_string(offset=offset, limit=page_size)
         if query_string:
             page_query = f"{page_query}&{query_string}"
@@ -251,22 +261,52 @@ def fetch_vex_logs_incremental(
         if not isinstance(batch, list):
             raise RuntimeError("Incremental VEX logs response did not include a results list.")
         if not batch:
+            print("[fetch_invite_hub_logs] No batch results returned.", flush=True)
             return records
 
-        previous_id: int | None = None
+        dict_batch: list[dict[str, Any]] = []
+        batch_ids: list[int] = []
         for item in batch:
             if not isinstance(item, dict):
                 raise RuntimeError("Incremental VEX logs response included a non-object record.")
-            source_log_id = parse_source_log_id(item)
-            if previous_id is not None and source_log_id >= previous_id:
-                raise RuntimeError("Expected VEX log ids to be returned in descending order.")
-            previous_id = source_log_id
+            dict_batch.append(item)
+            batch_ids.append(parse_source_log_id(item))
 
-            if last_source_log_id is not None and source_log_id <= last_source_log_id:
-                return records
-            records.append(item)
+        is_descending = all(prev > curr for prev, curr in zip(batch_ids, batch_ids[1:]))
+        is_ascending = all(prev < curr for prev, curr in zip(batch_ids, batch_ids[1:]))
+
+        if is_descending:
+            for item, source_log_id in zip(dict_batch, batch_ids):
+                if last_source_log_id is not None and source_log_id <= last_source_log_id:
+                    return records
+                if source_log_id in seen_ids:
+                    continue
+                records.append(item)
+                seen_ids.add(source_log_id)
+        else:
+            for item, source_log_id in sorted(
+                zip(dict_batch, batch_ids),
+                key=lambda pair: pair[1],
+                reverse=True,
+            ):
+                if last_source_log_id is not None and source_log_id <= last_source_log_id:
+                    continue
+                if source_log_id in seen_ids:
+                    continue
+                records.append(item)
+                seen_ids.add(source_log_id)
+
+            if is_ascending and last_source_log_id is not None and max(batch_ids) <= last_source_log_id:
+                offset += page_size
+                if len(batch) < page_size:
+                    return records
+                continue
 
         if len(batch) < page_size:
+            print(
+                f"[fetch_invite_hub_logs] Final incremental batch received with {len(batch)} records.",
+                flush=True,
+            )
             return records
         offset += page_size
 
@@ -294,7 +334,13 @@ def count_download_records(text: str) -> int:
 
 
 def load_parse_helpers() -> tuple[Any, Any, Any]:
-    from parse_event_logs import insert_rows, parse_records, parse_text_blob
+    try:
+        from src.parse_event_logs import insert_rows, parse_records, parse_text_blob
+    except ModuleNotFoundError:
+        try:
+            from server.src.parse_event_logs import insert_rows, parse_records, parse_text_blob
+        except ModuleNotFoundError:
+            from parse_event_logs import insert_rows, parse_records, parse_text_blob
 
     return insert_rows, parse_records, parse_text_blob
 
@@ -371,7 +417,9 @@ def main() -> None:
 
     load_local_env()
     base_url = os.getenv("INVITE_HUB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    print(f"[fetch_invite_hub_logs] Base URL: {base_url}", flush=True)
     token = get_auth_token(base_url)
+    print("[fetch_invite_hub_logs] Authentication complete.", flush=True)
 
     filter_query = build_query_string(
         search=args.search,
@@ -412,6 +460,7 @@ def main() -> None:
             page_size=args.page_size,
             last_source_log_id=last_source_log_id,
         )
+        print(f"[fetch_invite_hub_logs] Incremental fetch returned {len(raw_records)} records.", flush=True)
         text = serialize_records_as_ndjson(list(reversed(raw_records)))
         write_text_output(output_path, text)
         fetched_count = len(raw_records)
