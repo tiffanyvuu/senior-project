@@ -1,6 +1,8 @@
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+
+from src.agent_pipeline import build_agent_response
 
 from src.schemas import (
     FeedbackRequest,
@@ -31,12 +33,36 @@ def create_response(
     student_id: str,
     payload: StudentResponseRequest,
 ) -> StudentResponseResponse:
+    if payload.response_text is not None:
+        return StudentResponseResponse(
+            response_id=str(uuid4()),
+            student_id=student_id,
+            message_id=payload.message_id,
+            response_text=payload.response_text,
+            status="received",
+        )
+
+    source = payload.source or ("help_button" if payload.student_message == "" else "chat")
+    try:
+        bundle = build_agent_response(
+            student_id,
+            student_message=payload.student_message,
+            source=source,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return StudentResponseResponse(
         response_id=str(uuid4()),
         student_id=student_id,
         message_id=payload.message_id,
-        response_text=payload.response_text,
-        status="received",
+        response_text=bundle.response_text,
+        status="generated",
+        session_id=bundle.session_id,
+        progress_pct=bundle.progress_pct,
+        feedback_types=bundle.feedback_types,
+        context_prompt=bundle.context_prompt,
+        synced_log_count=bundle.synced_log_count,
     )
 
 

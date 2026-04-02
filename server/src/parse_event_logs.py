@@ -6,7 +6,10 @@ from typing import Any
 
 from psycopg.types.json import Json
 
-from db import get_conn
+try:
+    from src.db import get_conn
+except ImportError:
+    from db import get_conn
 
 
 def parse_iso_timestamp(value: Any) -> str | None:

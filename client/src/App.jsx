@@ -21,18 +21,11 @@ function App() {
   const [openReviews, setOpenReviews] = useState({});
   const [pendingFeedback, setPendingFeedback] = useState({});
   const apiBase = defaultApiBase;
-  const studentId = "student-1";
+  const studentId =
+    new URLSearchParams(window.location.search).get("studentId") || "test_student";
 
   const appendMessage = (message) => {
     setMessages((current) => [...current, message]);
-  };
-
-  const buildTemporaryReply = (messageText) => {
-    if (!messageText.trim()) {
-      return "Think about if your while loop condition ever becomes false.";
-    }
-
-    return "Think about if your while loop condition ever becomes false.";
   };
 
   const postJson = async (path, payload) => {
@@ -150,10 +143,10 @@ function App() {
       const messageResponse = await postJson(`/students/${studentId}/messages`, {
         message: trimmedDraft,
       });
-      const responseText = buildTemporaryReply(trimmedDraft);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text: responseText,
+        student_message: trimmedDraft,
+        source: messageResponse.source,
       });
       setMessages((current) =>
         [
@@ -169,7 +162,10 @@ function App() {
             id: responseRecord.response_id,
             role: "assistant",
             body: responseRecord.response_text,
-            meta: "Temporary test reply",
+            meta:
+              responseRecord.progress_pct != null
+                ? `Live backend reply - ${Math.round(responseRecord.progress_pct)}% progress`
+                : "Live backend reply",
             canFeedback: true,
           },
         ],
@@ -199,14 +195,17 @@ function App() {
       });
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
-        response_text:
-          "Think about if your while loop condition ever becomes false.",
+        student_message: "",
+        source: messageResponse.source,
       });
       appendMessage({
         id: responseRecord.response_id,
         role: "assistant",
         body: responseRecord.response_text,
-        meta: "Temporary test reply",
+        meta:
+          responseRecord.progress_pct != null
+            ? `Live backend reply - ${Math.round(responseRecord.progress_pct)}% progress`
+            : "Live backend reply",
         canFeedback: true,
       });
     } catch (error) {

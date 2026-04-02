@@ -179,8 +179,10 @@ def to_event_record(row: dict[str, Any]) -> EventRecord:
 
 def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
     from psycopg.rows import dict_row
-
-    from db import get_conn
+    try:
+        from src.db import get_conn
+    except ImportError:
+        from db import get_conn
 
     sql = """
     SELECT
@@ -479,7 +481,10 @@ def analyze_current_state(events: list[EventRecord]) -> CurrentStateSnapshot:
 
 
 def upsert_snapshot(snapshot: CurrentStateSnapshot) -> None:
-    from db import get_conn
+    try:
+        from src.db import get_conn
+    except ImportError:
+        from db import get_conn
 
     sql = """
     INSERT INTO current_state.state_snapshots (

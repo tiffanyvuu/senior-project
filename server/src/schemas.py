@@ -20,7 +20,18 @@ class StudentResponseRequest(BaseModel):
         default=None,
         description="Associated inbound message identifier, if available.",
     )
-    response_text: str = Field(description="LLM-generated text shown to the student.")
+    response_text: str | None = Field(
+        default=None,
+        description="Optional pre-generated text shown to the student.",
+    )
+    student_message: str = Field(
+        default="",
+        description="Original student message text, if available.",
+    )
+    source: Literal["chat", "help_button"] | None = Field(
+        default=None,
+        description="Interaction source used to trigger response generation.",
+    )
 
 
 class StudentResponseResponse(BaseModel):
@@ -28,7 +39,12 @@ class StudentResponseResponse(BaseModel):
     student_id: str
     message_id: str | None
     response_text: str
-    status: Literal["received"]
+    status: Literal["received", "generated"]
+    session_id: str | None = None
+    progress_pct: float | None = None
+    feedback_types: list[str] = Field(default_factory=list)
+    context_prompt: str | None = None
+    synced_log_count: int | None = None
 
 
 class FeedbackRequest(BaseModel):
