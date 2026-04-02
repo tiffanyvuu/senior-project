@@ -207,6 +207,23 @@ def fetch_events_from_db(student_id: str, session_id: str) -> list[EventRecord]:
     return [event for event in events if event.playground is not None]
 
 
+def has_active_project_run(events: list[EventRecord]) -> bool:
+    latest_run_ts: datetime | None = None
+    latest_end_ts: datetime | None = None
+
+    for event in events:
+        if event.event_type == "runProject":
+            latest_run_ts = event.event_ts
+        elif event.event_type == "projectEnd":
+            latest_end_ts = event.event_ts
+
+    if latest_run_ts is None:
+        return False
+    if latest_end_ts is None:
+        return True
+    return latest_run_ts > latest_end_ts
+
+
 def build_raw_logs_context(
     student_id: str,
     session_id: str,

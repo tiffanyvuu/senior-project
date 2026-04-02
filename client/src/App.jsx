@@ -108,6 +108,7 @@ function renderMessageBody(text) {
 
 function App() {
   const [studentIdDraft, setStudentIdDraft] = useState("");
+  const [sessionIdDraft, setSessionIdDraft] = useState("");
   const [studentId, setStudentId] = useState("");
   const [sessionId, setSessionId] = useState("Detecting latest session");
   const [draft, setDraft] = useState("");
@@ -217,11 +218,12 @@ function App() {
   const handleStudentStart = (event) => {
     event.preventDefault();
     const trimmedStudentId = studentIdDraft.trim();
+    const trimmedSessionId = sessionIdDraft.trim();
     if (!trimmedStudentId) {
       return;
     }
     setStudentId(trimmedStudentId);
-    setSessionId("Detecting latest session");
+    setSessionId(trimmedSessionId || "Detecting latest session");
   };
 
   const handleSend = async (event) => {
@@ -244,9 +246,11 @@ function App() {
     setPendingAction("message");
 
     try {
-      const messageResponse = await postJson(`/students/${studentId}/messages`, {
+      const messagePayload = {
         message: trimmedDraft,
-      });
+        ...(sessionIdDraft.trim() ? { session_id: sessionIdDraft.trim() } : {}),
+      };
+      const messageResponse = await postJson(`/students/${studentId}/messages`, messagePayload);
       setSessionId(messageResponse.session_id);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
@@ -301,9 +305,11 @@ function App() {
     setPendingAction("help");
 
     try {
-      const messageResponse = await postJson(`/students/${studentId}/messages`, {
+      const messagePayload = {
         message: "",
-      });
+        ...(sessionIdDraft.trim() ? { session_id: sessionIdDraft.trim() } : {}),
+      };
+      const messageResponse = await postJson(`/students/${studentId}/messages`, messagePayload);
       setSessionId(messageResponse.session_id);
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
@@ -359,7 +365,7 @@ function App() {
       <main className="app-shell">
         <section className="start-card">
           <h1>Start Chat</h1>
-          <p>Enter your student ID before starting the chat.</p>
+          <p>Enter your student ID. Session ID is optional if you want to target a specific test session.</p>
           <form className="start-form" onSubmit={handleStudentStart}>
             <label className="sr-only" htmlFor="student-id">
               Student ID
@@ -370,6 +376,17 @@ function App() {
               value={studentIdDraft}
               onChange={(event) => setStudentIdDraft(event.target.value)}
               placeholder="Student ID"
+              autoComplete="off"
+            />
+            <label className="sr-only" htmlFor="session-id">
+              Session ID
+            </label>
+            <input
+              id="session-id"
+              type="text"
+              value={sessionIdDraft}
+              onChange={(event) => setSessionIdDraft(event.target.value)}
+              placeholder="Session ID (optional)"
               autoComplete="off"
             />
             <button type="submit">Start Chat</button>

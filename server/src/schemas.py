@@ -4,6 +4,10 @@ from pydantic import BaseModel, Field
 
 
 class MessageRequest(BaseModel):
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session identifier override for testing or replaying a known session.",
+    )
     message: str = Field(default="", description="Student message text.")
     playground: str | None = Field(
         default=None,

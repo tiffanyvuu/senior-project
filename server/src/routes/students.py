@@ -4,7 +4,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException
 
 from src.block_catalog import resolve_available_blocks
-from src.current_state_metrics import build_raw_logs_context, compute_snapshot_for_student_session
+from src.current_state_metrics import (
+    build_raw_logs_context,
+    compute_snapshot_for_student_session,
+    fetch_events_from_db,
+    has_active_project_run,
+)
 from src.db import (
     get_latest_session_id_for_student,
     get_message_id_for_response,
@@ -28,6 +33,10 @@ from src.task_catalog import resolve_task_description
 router = APIRouter(prefix="/v1", tags=["students"])
 logger = logging.getLogger(__name__)
 DEFAULT_PLAYGROUND = "GO-Mars"
+ACTIVE_RUN_MESSAGE = (
+    "Please stop your current run using the Stop button in the bottom-right of the playground, "
+    "then ask for help again."
+)
 
 
 def log_stage(stage: str, **fields: object) -> None:
@@ -54,8 +63,11 @@ def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
     source = "help_button" if payload.message == "" else "chat"
     student_message_text = payload.message if payload.message else "Help"
     resolved_playground = payload.playground or DEFAULT_PLAYGROUND
-    sync_invite_hub_logs(student_id=student_id)
-    resolved_session_id = resolve_session_id_for_student(student_id)
+    if payload.session_id:
+        resolved_session_id = payload.session_id
+    else:
+        sync_invite_hub_logs(student_id=student_id)
+        resolved_session_id = resolve_session_id_for_student(student_id)
     session_uuid = UUID(resolved_session_id)
     append_session_message(
         student_id=student_id,
@@ -107,46 +119,62 @@ def create_response(
     recent_messages: list[dict[str, str]] = []
     if task and payload.student_message:
         try:
-            synced_log_count = sync_invite_hub_logs(student_id=student_id)
-            resolved_session_id = resolved_session_id or resolve_session_id_for_student(student_id)
-            snapshot = compute_snapshot_for_student_session(
+            if resolved_session_id is None:
+                synced_log_count = sync_invite_hub_logs(student_id=student_id)
+                resolved_session_id = resolve_session_id_for_student(student_id)
+            events = fetch_events_from_db(
                 student_id=student_id,
                 session_id=resolved_session_id,
-                insert=True,
             )
+            if has_active_project_run(events):
+                response_text = ACTIVE_RUN_MESSAGE
+                log_stage(
+                    "Active Run Detected",
+                    student_id=student_id,
+                    session_id=resolved_session_id,
+                    synced_log_count=synced_log_count,
+                    message=response_text,
+                )
+            else:
+                snapshot = compute_snapshot_for_student_session(
+                    student_id=student_id,
+                    session_id=resolved_session_id,
+                    insert=True,
+                )
         except Exception as error:
             raise HTTPException(
                 status_code=500,
                 detail=f"Current state analysis failed: {error}",
             ) from error
-        log_stage(
-            "Current State Analyzer Output",
-            student_id=student_id,
-            session_id=resolved_session_id,
-            synced_log_count=synced_log_count,
-            snapshot=snapshot.to_dict(),
-        )
-        feedback_classes = determine_feedback_class(snapshot)
-        if not feedback_classes:
-            feedback_classes = {FeedbackClass.QUESTION}
-        raw_logs = build_raw_logs_context(
-            student_id=student_id,
-            session_id=resolved_session_id,
-        )
-        recent_messages = get_recent_session_messages(
-            student_id,
-            resolved_playground,
-            resolved_session_id,
-        )
-        log_stage(
-            "Feedback Policy Output",
-            student_id=student_id,
-            session_id=resolved_session_id,
-            synced_log_count=synced_log_count,
-            feedback_classes=sorted(
-                feedback_class.value for feedback_class in feedback_classes
-            ),
-        )
+        if response_text is None:
+            log_stage(
+                "Current State Analyzer Output",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                synced_log_count=synced_log_count,
+                snapshot=snapshot.to_dict(),
+            )
+            feedback_classes = determine_feedback_class(snapshot)
+            if not feedback_classes:
+                feedback_classes = {FeedbackClass.QUESTION}
+            raw_logs = build_raw_logs_context(
+                student_id=student_id,
+                session_id=resolved_session_id,
+            )
+            recent_messages = get_recent_session_messages(
+                student_id,
+                resolved_playground,
+                resolved_session_id,
+            )
+            log_stage(
+                "Feedback Policy Output",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                synced_log_count=synced_log_count,
+                feedback_classes=sorted(
+                    feedback_class.value for feedback_class in feedback_classes
+                ),
+            )
 
     if task and payload.student_message and feedback_classes:
         try:
