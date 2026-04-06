@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const defaultApiBase = "http://127.0.0.1:8000/v1";
 
@@ -106,6 +106,21 @@ function renderMessageBody(text) {
   return elements;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getDefaultPanelRect() {
+  const width = 460;
+  const height = 760;
+  return {
+    x: Math.max(12, window.innerWidth - width - 24),
+    y: 32,
+    width,
+    height,
+  };
+}
+
 function App() {
   const [studentIdDraft, setStudentIdDraft] = useState("");
   const [sessionIdDraft, setSessionIdDraft] = useState("");
@@ -117,7 +132,96 @@ function App() {
   const [reviewDrafts, setReviewDrafts] = useState({});
   const [openReviews, setOpenReviews] = useState({});
   const [pendingFeedback, setPendingFeedback] = useState({});
+  const [panelRect, setPanelRect] = useState(getDefaultPanelRect);
+  const [isChatOpen, setIsChatOpen] = useState(true);
+  const interactionRef = useRef(null);
   const apiBase = defaultApiBase;
+
+  useEffect(() => {
+    const handlePointerMove = (event) => {
+      const interaction = interactionRef.current;
+      if (!interaction) {
+        return;
+      }
+
+      if (interaction.type === "drag") {
+        setPanelRect((current) => {
+          const nextX = clamp(
+            event.clientX - interaction.offsetX,
+            12,
+            window.innerWidth - current.width - 12,
+          );
+          const nextY = clamp(
+            event.clientY - interaction.offsetY,
+            12,
+            window.innerHeight - 120,
+          );
+          return {
+            ...current,
+            x: nextX,
+            y: nextY,
+          };
+        });
+        return;
+      }
+
+      if (interaction.type === "resize") {
+        const nextRight = event.clientX + interaction.cornerOffsetX;
+        const nextBottom = event.clientY + interaction.cornerOffsetY;
+        const nextWidth = clamp(
+          nextRight - interaction.startRect.x,
+          360,
+          window.innerWidth - interaction.startRect.x - 12,
+        );
+        const nextHeight = clamp(
+          nextBottom - interaction.startRect.y,
+          520,
+          window.innerHeight - interaction.startRect.y - 12,
+        );
+        setPanelRect((current) => ({
+          ...current,
+          width: nextWidth,
+          height: nextHeight,
+        }));
+      }
+    };
+
+    const handlePointerUp = () => {
+      interactionRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, []);
+
+  const startDrag = (event) => {
+    if (event.target.closest("button, textarea, input")) {
+      return;
+    }
+    interactionRef.current = {
+      type: "drag",
+      offsetX: event.clientX - panelRect.x,
+      offsetY: event.clientY - panelRect.y,
+    };
+  };
+
+  const startResize = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const cornerX = panelRect.x + panelRect.width;
+    const cornerY = panelRect.y + panelRect.height;
+    interactionRef.current = {
+      type: "resize",
+      cornerOffsetX: cornerX - event.clientX,
+      cornerOffsetY: cornerY - event.clientY,
+      startRect: { ...panelRect },
+    };
+  };
 
   const appendMessage = (message) => {
     setMessages((current) => [...current, message]);
@@ -397,24 +501,41 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <section className="chat-card">
-        <header className="toolbar">
-          <div className="toolbar-copy">
-            <h1>Chat</h1>
-            <p>{studentId} · GO-Mars · {sessionId}</p>
-          </div>
-          <button
-            type="button"
-            className="help-button"
-            onClick={handleHelp}
-            disabled={pendingAction === "help"}
-          >
-            {pendingAction === "help" ? "Sending..." : "Help"}
-          </button>
-        </header>
+    <main className="overlay-shell">
+      <iframe
+        className="background-frame"
+        src="https://research-vr.vex.com/"
+        title="Research VR"
+      />
 
-        <div className="workspace">
+      {isChatOpen ? (
+        <section
+          className="chat-overlay"
+          style={{
+            left: `${panelRect.x}px`,
+            top: `${panelRect.y}px`,
+            width: `${panelRect.width}px`,
+            height: `${panelRect.height}px`,
+          }}
+        >
+          <header className="toolbar draggable-toolbar" onPointerDown={startDrag}>
+            <div className="toolbar-copy">
+              <h1>Chat</h1>
+              <p>{studentId} · GO-Mars · {sessionId}</p>
+            </div>
+            <div className="toolbar-actions">
+              <button
+                type="button"
+                className="help-button"
+                onClick={handleHelp}
+                disabled={pendingAction === "help"}
+              >
+                {pendingAction === "help" ? "Sending..." : "Help"}
+              </button>
+            </div>
+          </header>
+
+        <div className="workspace workspace-overlay">
           <section className="message-list" aria-label="Conversation">
             {messages.map((message) => (
               <article
@@ -526,7 +647,23 @@ function App() {
             </button>
           </div>
         </form>
-      </section>
+          <button
+            type="button"
+            className="resize-handle"
+            onPointerDown={startResize}
+            aria-label="Resize chat"
+            title="Resize chat"
+          />
+        </section>
+      ) : null}
+
+      <button
+        type="button"
+        className="chat-launcher"
+        onClick={() => setIsChatOpen((current) => !current)}
+      >
+        {isChatOpen ? "Hide Chat" : "Open Chat"}
+      </button>
     </main>
   );
 }
