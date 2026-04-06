@@ -34,7 +34,7 @@ router = APIRouter(prefix="/v1", tags=["students"])
 logger = logging.getLogger(__name__)
 DEFAULT_PLAYGROUND = "GO-Mars"
 ACTIVE_RUN_MESSAGE = (
-    "Please stop your current run using the Stop button in the bottom-right of the playground, "
+    "Please stop your current run using the Stop button in the bottom-left of the playground, "
     "then ask for help again."
 )
 
