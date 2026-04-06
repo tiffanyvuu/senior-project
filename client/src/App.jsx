@@ -464,42 +464,6 @@ function App() {
     }
   };
 
-  if (!studentId) {
-    return (
-      <main className="app-shell">
-        <section className="start-card">
-          <h1>Start Chat</h1>
-          <p>Enter your student ID. Session ID is optional if you want to target a specific test session.</p>
-          <form className="start-form" onSubmit={handleStudentStart}>
-            <label className="sr-only" htmlFor="student-id">
-              Student ID
-            </label>
-            <input
-              id="student-id"
-              type="text"
-              value={studentIdDraft}
-              onChange={(event) => setStudentIdDraft(event.target.value)}
-              placeholder="Student ID"
-              autoComplete="off"
-            />
-            <label className="sr-only" htmlFor="session-id">
-              Session ID
-            </label>
-            <input
-              id="session-id"
-              type="text"
-              value={sessionIdDraft}
-              onChange={(event) => setSessionIdDraft(event.target.value)}
-              placeholder="Session ID (optional)"
-              autoComplete="off"
-            />
-            <button type="submit">Start Chat</button>
-          </form>
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className="overlay-shell">
       <iframe
@@ -510,7 +474,7 @@ function App() {
 
       {isChatOpen ? (
         <section
-          className="chat-overlay"
+          className={`chat-overlay ${!studentId ? "chat-overlay-start" : ""}`}
           style={{
             left: `${panelRect.x}px`,
             top: `${panelRect.y}px`,
@@ -518,135 +482,176 @@ function App() {
             height: `${panelRect.height}px`,
           }}
         >
-          <header className="toolbar draggable-toolbar" onPointerDown={startDrag}>
-            <div className="toolbar-copy">
-              <h1>Chat</h1>
-              <p>{studentId} · GO-Mars · {sessionId}</p>
-            </div>
-            <div className="toolbar-actions">
-              <button
-                type="button"
-                className="help-button"
-                onClick={handleHelp}
-                disabled={pendingAction === "help"}
-              >
-                {pendingAction === "help" ? "Sending..." : "Help"}
-              </button>
-            </div>
-          </header>
+          {studentId ? (
+            <header className="toolbar draggable-toolbar" onPointerDown={startDrag}>
+              <div className="toolbar-copy">
+                <h1>Chat</h1>
+                <p>{`${studentId} · GO-Mars · ${sessionId}`}</p>
+              </div>
+              <div className="toolbar-actions">
+                <button
+                  type="button"
+                  className="help-button"
+                  onClick={handleHelp}
+                  disabled={pendingAction === "help" || pendingAction === "message"}
+                >
+                  {pendingAction === "help" ? "Sending..." : "Help"}
+                </button>
+              </div>
+            </header>
+          ) : null}
 
         <div className="workspace workspace-overlay">
-          <section className="message-list" aria-label="Conversation">
-            {messages.map((message) => (
-              <article
-                key={message.id}
-                className={`message-row ${message.role === "student" ? "outgoing" : "incoming"}`}
+          {!studentId ? (
+            <div className="start-drag-surface" onPointerDown={startDrag}>
+              <section
+                className="start-card start-card-inline"
+                onPointerDown={(event) => event.stopPropagation()}
               >
-                <div className="message-bubble">
-                  <div className="message-label">
-                    {message.role === "student" ? "You" : "Agent"}
-                  </div>
-                  <div className="message-body-wrap">{renderMessageBody(message.body)}</div>
-                  <span className="message-meta">{message.meta}</span>
-                  {message.role === "assistant" && message.canFeedback ? (
-                    <div className="feedback-panel">
-                      <div className="feedback-actions">
-                        <button
-                          type="button"
-                          className={`icon-button ${message.selectedThumb === "up" ? "selected" : ""}`}
-                          onClick={() => handleFeedback(message.id, "up")}
-                          disabled={Boolean(pendingFeedback[message.id])}
-                          aria-label="Thumbs up"
-                          title="Thumbs up"
-                        >
-                          {pendingFeedback[message.id] === "up" ? (
-                            "..."
-                          ) : (
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M10 21H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h4v11Zm2-11 2.6-6.1A1.5 1.5 0 0 1 16 3a2 2 0 0 1 2 2v4h2.7a2 2 0 0 1 2 2.4l-1.2 6A2 2 0 0 1 19.5 19H12V10Z" />
-                            </svg>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className={`icon-button ${message.selectedThumb === "down" ? "selected" : ""}`}
-                          onClick={() => handleFeedback(message.id, "down")}
-                          disabled={Boolean(pendingFeedback[message.id])}
-                          aria-label="Thumbs down"
-                          title="Thumbs down"
-                        >
-                          {pendingFeedback[message.id] === "down" ? (
-                            "..."
-                          ) : (
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                              <path d="M14 3h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4V3Zm-2 11-2.6 6.1A1.5 1.5 0 0 1 8 21a2 2 0 0 1-2-2v-4H3.3a2 2 0 0 1-2-2.4l1.2-6A2 2 0 0 1 4.5 5H12v9Z" />
-                            </svg>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          className="review-toggle"
-                          onClick={() =>
-                            setOpenReviews((current) => ({
-                              ...current,
-                              [message.id]: !current[message.id],
-                            }))
-                          }
-                        >
-                          {openReviews[message.id] ? "Hide Review" : "Add Review"}
-                        </button>
-                      </div>
-                      {openReviews[message.id] ? (
-                        <div className="review-form">
-                          <textarea
-                            rows="2"
-                            value={reviewDrafts[message.id] || ""}
-                            onChange={(event) =>
-                              setReviewDrafts((current) => ({
-                                ...current,
-                                [message.id]: event.target.value,
-                              }))
-                            }
-                            placeholder="Write a review if you want."
-                          />
+                <h2>Start Chat</h2>
+                <p>Enter your student ID. Session ID is optional if you want to target a specific test session.</p>
+                <form className="start-form" onSubmit={handleStudentStart}>
+                  <label className="sr-only" htmlFor="student-id">
+                    Student ID
+                  </label>
+                  <input
+                    id="student-id"
+                    type="text"
+                    value={studentIdDraft}
+                    onChange={(event) => setStudentIdDraft(event.target.value)}
+                    placeholder="Student ID"
+                    autoComplete="off"
+                  />
+                  <label className="sr-only" htmlFor="session-id">
+                    Session ID
+                  </label>
+                  <input
+                    id="session-id"
+                    type="text"
+                    value={sessionIdDraft}
+                    onChange={(event) => setSessionIdDraft(event.target.value)}
+                    placeholder="Session ID (optional)"
+                    autoComplete="off"
+                  />
+                  <button type="submit">Start Chat</button>
+                </form>
+              </section>
+            </div>
+          ) : (
+            <section className="message-list" aria-label="Conversation">
+              {messages.map((message) => (
+                <article
+                  key={message.id}
+                  className={`message-row ${message.role === "student" ? "outgoing" : "incoming"}`}
+                >
+                  <div className="message-bubble">
+                    <div className="message-label">
+                      {message.role === "student" ? "You" : "Agent"}
+                    </div>
+                    <div className="message-body-wrap">{renderMessageBody(message.body)}</div>
+                    <span className="message-meta">{message.meta}</span>
+                    {message.role === "assistant" && message.canFeedback ? (
+                      <div className="feedback-panel">
+                        <div className="feedback-actions">
                           <button
                             type="button"
-                            className="send-review"
-                            onClick={() => handleReviewSubmit(message.id)}
+                            className={`icon-button ${message.selectedThumb === "up" ? "selected" : ""}`}
+                            onClick={() => handleFeedback(message.id, "up")}
                             disabled={Boolean(pendingFeedback[message.id])}
+                            aria-label="Thumbs up"
+                            title="Thumbs up"
                           >
-                            {pendingFeedback[message.id] === "review" ? "Sending..." : "Send Review"}
+                            {pendingFeedback[message.id] === "up" ? (
+                              "..."
+                            ) : (
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M10 21H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h4v11Zm2-11 2.6-6.1A1.5 1.5 0 0 1 16 3a2 2 0 0 1 2 2v4h2.7a2 2 0 0 1 2 2.4l-1.2 6A2 2 0 0 1 19.5 19H12V10Z" />
+                              </svg>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className={`icon-button ${message.selectedThumb === "down" ? "selected" : ""}`}
+                            onClick={() => handleFeedback(message.id, "down")}
+                            disabled={Boolean(pendingFeedback[message.id])}
+                            aria-label="Thumbs down"
+                            title="Thumbs down"
+                          >
+                            {pendingFeedback[message.id] === "down" ? (
+                              "..."
+                            ) : (
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M14 3h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4V3Zm-2 11-2.6 6.1A1.5 1.5 0 0 1 8 21a2 2 0 0 1-2-2v-4H3.3a2 2 0 0 1-2-2.4l1.2-6A2 2 0 0 1 4.5 5H12v9Z" />
+                              </svg>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className="review-toggle"
+                            onClick={() =>
+                              setOpenReviews((current) => ({
+                                ...current,
+                                [message.id]: !current[message.id],
+                              }))
+                            }
+                          >
+                            {openReviews[message.id] ? "Hide Review" : "Add Review"}
                           </button>
                         </div>
-                      ) : null}
-                      {message.feedbackStatus ? (
-                        <div className="feedback-status">{message.feedbackStatus}</div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </section>
+                        {openReviews[message.id] ? (
+                          <div className="review-form">
+                            <textarea
+                              rows="2"
+                              value={reviewDrafts[message.id] || ""}
+                              onChange={(event) =>
+                                setReviewDrafts((current) => ({
+                                  ...current,
+                                  [message.id]: event.target.value,
+                                }))
+                              }
+                              placeholder="Write a review if you want."
+                            />
+                            <button
+                              type="button"
+                              className="send-review"
+                              onClick={() => handleReviewSubmit(message.id)}
+                              disabled={Boolean(pendingFeedback[message.id])}
+                            >
+                              {pendingFeedback[message.id] === "review" ? "Sending..." : "Send Review"}
+                            </button>
+                          </div>
+                        ) : null}
+                        {message.feedbackStatus ? (
+                          <div className="feedback-status">{message.feedbackStatus}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+            </section>
+          )}
         </div>
 
-        <form className="composer" onSubmit={handleSend}>
-          <label className="sr-only" htmlFor="student-message">
-            Message
-          </label>
-          <textarea
-            id="student-message"
-            rows="3"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Ask about your program, your bug, or what to try next."
-          />
-          <div className="composer-footer">
-            <button type="submit" disabled={pendingAction === "message"}>
-              {pendingAction === "message" ? "Sending..." : "Send"}
-            </button>
-          </div>
-        </form>
+        {studentId ? (
+          <form className="composer" onSubmit={handleSend}>
+            <label className="sr-only" htmlFor="student-message">
+              Message
+            </label>
+            <textarea
+              id="student-message"
+              rows="3"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Ask about your program, your bug, or what to try next."
+            />
+            <div className="composer-footer">
+              <button type="submit" disabled={pendingAction === "message" || !draft.trim()}>
+                {pendingAction === "message" ? "Sending..." : "Send"}
+              </button>
+            </div>
+          </form>
+        ) : null}
           <button
             type="button"
             className="resize-handle"
