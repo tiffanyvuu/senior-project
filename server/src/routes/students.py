@@ -4,10 +4,21 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, HTTPException
 
 from src.block_catalog import resolve_available_blocks
-from src.current_state_metrics import build_raw_logs_context, compute_snapshot_for_student_session
-from src.db import get_message_id_for_response, insert_message, insert_message_feedback
+from src.current_state_metrics import (
+    build_raw_logs_context,
+    compute_snapshot_for_student_session,
+    fetch_events_from_db,
+    has_active_project_run,
+)
+from src.db import (
+    get_latest_session_id_for_student,
+    get_message_id_for_response,
+    insert_message,
+    insert_message_feedback,
+)
 from src.feedback_policy import FeedbackClass, determine_feedback_class
 from src.llm_service import generate_main_llm_response
+from src.log_sync import sync_invite_hub_logs
 from src.schemas import (
     FeedbackRequest,
     FeedbackResponse,
@@ -21,6 +32,11 @@ from src.task_catalog import resolve_task_description
 
 router = APIRouter(prefix="/v1", tags=["students"])
 logger = logging.getLogger(__name__)
+DEFAULT_PLAYGROUND = "GO-Mars"
+ACTIVE_RUN_MESSAGE = (
+    "Please stop your current run using the Stop button in the bottom-left of the playground, "
+    "then ask for help again."
+)
 
 
 def log_stage(stage: str, **fields: object) -> None:
@@ -28,16 +44,35 @@ def log_stage(stage: str, **fields: object) -> None:
     lines.extend(f"  {key}: {value}" for key, value in fields.items())
     logger.info("\n".join(lines))
 
+
+def resolve_session_id_for_student(student_id: str) -> str:
+    session_id = get_latest_session_id_for_student(student_id)
+    if session_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No recent GO-Mars logs were found for this student. "
+                "Run the project once in VEX VR, then try again."
+            ),
+        )
+    return session_id
+
 @router.post("/students/{student_id}/messages", response_model=MessageResponse)
 def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
     message_id = uuid4()
-    session_uuid = UUID(payload.session_id)
     source = "help_button" if payload.message == "" else "chat"
     student_message_text = payload.message if payload.message else "Help"
+    resolved_playground = payload.playground or DEFAULT_PLAYGROUND
+    if payload.session_id:
+        resolved_session_id = payload.session_id
+    else:
+        sync_invite_hub_logs(student_id=student_id)
+        resolved_session_id = resolve_session_id_for_student(student_id)
+    session_uuid = UUID(resolved_session_id)
     append_session_message(
         student_id=student_id,
-        playground=payload.playground,
-        session_id=payload.session_id,
+        playground=resolved_playground,
+        session_id=resolved_session_id,
         role="student",
         content=student_message_text,
     )
@@ -50,16 +85,16 @@ def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
     log_stage(
         "Student Message Received",
         student_id=student_id,
-        session_id=payload.session_id,
-        playground=payload.playground,
+        session_id=resolved_session_id,
+        playground=resolved_playground,
         source=source,
         message=student_message_text,
     )
     return MessageResponse(
         message_id=str(message_id),
-        session_id=payload.session_id,
+        session_id=resolved_session_id,
         student_id=student_id,
-        playground=payload.playground,
+        playground=resolved_playground,
         message=payload.message,
         source=source,
         status="received",
@@ -72,53 +107,86 @@ def create_response(
     payload: StudentResponseRequest,
 ) -> StudentResponseResponse:
     response_id = uuid4()
-    session_uuid = UUID(payload.session_id)
+    resolved_session_id = payload.session_id
+    resolved_playground = payload.playground or DEFAULT_PLAYGROUND
     llm_request = None
     response_text = payload.response_text
     feedback_classes = set()
-    task = resolve_task_description(payload.playground)
-    available_blocks = resolve_available_blocks(payload.playground)
-    raw_logs = build_raw_logs_context(
-        student_id=student_id,
-        session_id=payload.session_id,
-    )
-    recent_messages = get_recent_session_messages(
-        student_id,
-        payload.playground,
-        payload.session_id,
-    )
+    synced_log_count = 0
+    task = resolve_task_description(resolved_playground)
+    available_blocks = resolve_available_blocks(resolved_playground)
+    raw_logs = "None"
+    recent_messages: list[dict[str, str]] = []
     if task and payload.student_message:
         try:
-            snapshot = compute_snapshot_for_student_session(
+            if resolved_session_id is None:
+                synced_log_count = sync_invite_hub_logs(student_id=student_id)
+                resolved_session_id = resolve_session_id_for_student(student_id)
+            events = fetch_events_from_db(
                 student_id=student_id,
-                session_id=payload.session_id,
-                insert=True,
+                session_id=resolved_session_id,
             )
+            if has_active_project_run(events):
+                response_text = ACTIVE_RUN_MESSAGE
+                log_stage(
+                    "Active Run Detected",
+                    student_id=student_id,
+                    session_id=resolved_session_id,
+                    synced_log_count=synced_log_count,
+                    message=response_text,
+                )
+            else:
+                snapshot = compute_snapshot_for_student_session(
+                    student_id=student_id,
+                    session_id=resolved_session_id,
+                    insert=True,
+                )
         except Exception as error:
             raise HTTPException(
                 status_code=500,
                 detail=f"Current state analysis failed: {error}",
             ) from error
-        log_stage(
-            "Current State Analyzer Output",
-            student_id=student_id,
-            session_id=payload.session_id,
-            snapshot=snapshot.to_dict(),
-        )
-        feedback_classes = determine_feedback_class(snapshot)
-        if not feedback_classes:
-            feedback_classes = {FeedbackClass.QUESTION}
-        log_stage(
-            "Feedback Policy Output",
-            student_id=student_id,
-            session_id=payload.session_id,
-            feedback_classes=sorted(
-                feedback_class.value for feedback_class in feedback_classes
-            ),
-        )
+        if response_text is None:
+            log_stage(
+                "Current State Analyzer Output",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                synced_log_count=synced_log_count,
+                snapshot=snapshot.to_dict(),
+            )
+            feedback_classes = determine_feedback_class(snapshot)
+            if not feedback_classes:
+                feedback_classes = {FeedbackClass.QUESTION}
+            raw_logs = build_raw_logs_context(
+                student_id=student_id,
+                session_id=resolved_session_id,
+            )
+            recent_messages = get_recent_session_messages(
+                student_id,
+                resolved_playground,
+                resolved_session_id,
+            )
+            log_stage(
+                "Feedback Policy Output",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                synced_log_count=synced_log_count,
+                feedback_classes=sorted(
+                    feedback_class.value for feedback_class in feedback_classes
+                ),
+            )
 
     if task and payload.student_message and feedback_classes:
         try:
+            log_stage(
+                "LLM Request Starting",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                model=task,
+                feedback_classes=sorted(
+                    feedback_class.value for feedback_class in feedback_classes
+                ),
+            )
             llm_request = generate_main_llm_response(
                 task=task,
                 student_message=payload.student_message,
@@ -130,7 +198,7 @@ def create_response(
             log_stage(
                 "LLM Prompt Sent",
                 student_id=student_id,
-                session_id=payload.session_id,
+                session_id=resolved_session_id,
                 model=llm_request["model"],
                 prompt=llm_request["prompt"],
             )
@@ -143,10 +211,15 @@ def create_response(
             detail="Either response_text or playground/student_message must be provided.",
         )
 
+    if resolved_session_id is None:
+        resolved_session_id = resolve_session_id_for_student(student_id)
+
+    session_uuid = UUID(resolved_session_id)
+
     append_session_message(
         student_id=student_id,
-        playground=payload.playground,
-        session_id=payload.session_id,
+        playground=resolved_playground,
+        session_id=resolved_session_id,
         role="assistant",
         content=response_text,
     )
@@ -165,16 +238,16 @@ def create_response(
     log_stage(
         "Assistant Response Sent",
         student_id=student_id,
-        session_id=payload.session_id,
+        session_id=resolved_session_id,
         response_id=str(response_id),
         message=response_text,
     )
 
     return StudentResponseResponse(
         response_id=str(response_id),
-        session_id=payload.session_id,
+        session_id=resolved_session_id,
         student_id=student_id,
-        playground=payload.playground,
+        playground=resolved_playground,
         message_id=payload.message_id,
         response_text=response_text,
         llm_model=llm_request["model"] if llm_request else None,

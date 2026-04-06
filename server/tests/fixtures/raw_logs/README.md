@@ -22,7 +22,7 @@
 ## Inserting Logs:
 ```
   for f in tests/fixtures/raw_logs/*.ndjson; do
-    python3 src/parse_event_logs.py --input \"$f\" --insert
+    python3 src/parse_event_logs.py --input "$f" --insert
   done
 ```
 

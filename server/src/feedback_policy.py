@@ -4,7 +4,10 @@ Feedback Policy
 
 from enum import Enum
 
-from src.current_state_metrics import CurrentStateSnapshot
+try:
+    from src.current_state_metrics import CurrentStateSnapshot
+except ModuleNotFoundError:
+    from server.src.current_state_metrics import CurrentStateSnapshot
 
 class FeedbackClass(Enum):
     # Acknowledge / Notify

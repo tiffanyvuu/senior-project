@@ -4,9 +4,15 @@ from pydantic import BaseModel, Field
 
 
 class MessageRequest(BaseModel):
-    session_id: str = Field(description="Session identifier for the current chat session.")
+    session_id: str | None = Field(
+        default=None,
+        description="Optional session identifier override for testing or replaying a known session.",
+    )
     message: str = Field(default="", description="Student message text.")
-    playground: str = Field(description="Task/playground identifier for the current activity.")
+    playground: str | None = Field(
+        default=None,
+        description="Task/playground identifier for the current activity, if already known.",
+    )
 
 
 class MessageResponse(BaseModel):
@@ -24,8 +30,14 @@ class StudentResponseRequest(BaseModel):
         default=None,
         description="Associated inbound message identifier, if available.",
     )
-    session_id: str = Field(description="Session identifier for the current chat session.")
-    playground: str = Field(description="Task/playground identifier for the current activity.")
+    session_id: str | None = Field(
+        default=None,
+        description="Resolved session identifier for the current chat session, if already known.",
+    )
+    playground: str | None = Field(
+        default=None,
+        description="Task/playground identifier for the current activity, if already known.",
+    )
     response_text: str | None = Field(
         default=None,
         description="LLM-generated text shown to the student.",

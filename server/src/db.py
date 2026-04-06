@@ -86,3 +86,20 @@ def get_message_id_for_response(*, response_id: UUID, student_id: str) -> int | 
             )
             row = cur.fetchone()
             return row[0] if row else None
+
+
+def get_latest_session_id_for_student(student_id: str) -> str | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT session_id
+                FROM event_logs.parsed_events
+                WHERE student_id = %s
+                ORDER BY event_ts DESC, id DESC
+                LIMIT 1
+                """,
+                (student_id,),
+            )
+            row = cur.fetchone()
+            return str(row[0]) if row else None

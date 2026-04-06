@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import openai
@@ -6,6 +7,8 @@ import openai
 from src.context_builder import build_feedback_prompt_from_classes
 from src.feedback_policy import FeedbackClass
 from src.settings import get_navigator_model
+
+DEFAULT_LLM_TIMEOUT_S = 30.0
 
 
 def prepare_main_llm_request(
@@ -63,6 +66,7 @@ def generate_main_llm_response(
     client = openai.OpenAI(
         api_key=api_key,
         base_url=base_url,
+        timeout=float(os.getenv("LLM_TIMEOUT_S", DEFAULT_LLM_TIMEOUT_S)),
     )
     response = client.chat.completions.create(
         model=llm_request["model"],
