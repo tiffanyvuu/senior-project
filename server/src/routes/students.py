@@ -17,7 +17,7 @@ from src.db import (
     insert_message_feedback,
 )
 from src.feedback_policy import FeedbackClass, determine_feedback_class
-from src.llm_service import generate_main_llm_response
+from src.llm_service import generate_main_llm_response, generate_robot_behavior_summary
 from src.log_sync import sync_invite_hub_logs
 from src.schemas import (
     FeedbackRequest,
@@ -116,6 +116,7 @@ def create_response(
     task = resolve_task_description(resolved_playground)
     available_blocks = resolve_available_blocks(resolved_playground)
     raw_logs = "None"
+    robot_behavior_summary = "None"
     recent_messages: list[dict[str, str]] = []
     if task and payload.student_message:
         try:
@@ -178,11 +179,29 @@ def create_response(
 
     if task and payload.student_message and feedback_classes:
         try:
+            robot_behavior_request = generate_robot_behavior_summary(
+                task=task,
+                raw_logs=raw_logs,
+            )
+            robot_behavior_summary = robot_behavior_request["response_text"]
+            log_stage(
+                "Robot Behavior Prompt Sent",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                model=robot_behavior_request["model"],
+                prompt=robot_behavior_request["prompt"],
+            )
+            log_stage(
+                "Robot Behavior Output",
+                student_id=student_id,
+                session_id=resolved_session_id,
+                behavior_summary=robot_behavior_summary,
+            )
             log_stage(
                 "LLM Request Starting",
                 student_id=student_id,
                 session_id=resolved_session_id,
-                model=task,
+                model=robot_behavior_request["model"],
                 feedback_classes=sorted(
                     feedback_class.value for feedback_class in feedback_classes
                 ),
@@ -191,7 +210,7 @@ def create_response(
                 task=task,
                 student_message=payload.student_message,
                 available_blocks=available_blocks,
-                raw_logs=raw_logs,
+                robot_behavior_summary=robot_behavior_summary,
                 recent_messages=recent_messages,
                 feedback_classes=feedback_classes,
             )

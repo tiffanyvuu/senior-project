@@ -4,7 +4,10 @@ from pathlib import Path
 
 import openai
 
-from src.context_builder import build_feedback_prompt_from_classes
+from src.context_builder import (
+    build_feedback_prompt_from_classes,
+    build_robot_behavior_prompt,
+)
 from src.feedback_policy import FeedbackClass
 from src.settings import get_navigator_model
 
@@ -15,7 +18,7 @@ def prepare_main_llm_request(
     task: str,
     student_message: str,
     available_blocks: list[str] | None,
-    raw_logs: str,
+    robot_behavior_summary: str,
     recent_messages: list[dict[str, str]],
     feedback_classes: set[FeedbackClass],
 ) -> dict[str, str]:
@@ -23,7 +26,7 @@ def prepare_main_llm_request(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks,
-        raw_logs=raw_logs,
+        robot_behavior_summary=robot_behavior_summary,
         recent_messages=recent_messages,
         feedback_classes=feedback_classes,
     )
@@ -46,11 +49,48 @@ def load_navigator_credentials() -> tuple[str, str]:
     return credentials["OPENAI_API_KEY"], credentials["base_url"]
 
 
+def create_openai_client() -> openai.OpenAI:
+    api_key, base_url = load_navigator_credentials()
+    return openai.OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=float(os.getenv("LLM_TIMEOUT_S", DEFAULT_LLM_TIMEOUT_S)),
+    )
+
+
+def execute_prompt(*, model: str, prompt: str) -> str:
+    client = create_openai_client()
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+    )
+    return response.choices[0].message.content
+
+
+def generate_robot_behavior_summary(task: str, raw_logs: str) -> dict[str, str]:
+    model = get_navigator_model()
+    prompt = build_robot_behavior_prompt(
+        task=task,
+        raw_logs=raw_logs,
+    )
+    response_text = execute_prompt(model=model, prompt=prompt)
+    return {
+        "model": model,
+        "prompt": prompt,
+        "response_text": response_text,
+    }
+
+
 def generate_main_llm_response(
     task: str,
     student_message: str,
     available_blocks: list[str] | None,
-    raw_logs: str,
+    robot_behavior_summary: str,
     recent_messages: list[dict[str, str]],
     feedback_classes: set[FeedbackClass],
 ) -> dict[str, str]:
@@ -58,27 +98,16 @@ def generate_main_llm_response(
         task=task,
         student_message=student_message,
         available_blocks=available_blocks,
-        raw_logs=raw_logs,
+        robot_behavior_summary=robot_behavior_summary,
         recent_messages=recent_messages,
         feedback_classes=feedback_classes,
     )
-    api_key, base_url = load_navigator_credentials()
-    client = openai.OpenAI(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=float(os.getenv("LLM_TIMEOUT_S", DEFAULT_LLM_TIMEOUT_S)),
-    )
-    response = client.chat.completions.create(
+    response_text = execute_prompt(
         model=llm_request["model"],
-        messages=[
-            {
-                "role": "user",
-                "content": llm_request["prompt"],
-            }
-        ],
+        prompt=llm_request["prompt"],
     )
     return {
         "model": llm_request["model"],
         "prompt": llm_request["prompt"],
-        "response_text": response.choices[0].message.content,
+        "response_text": response_text,
     }
