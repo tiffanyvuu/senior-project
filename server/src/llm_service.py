@@ -37,10 +37,16 @@ def prepare_main_llm_request(
 
 
 def load_navigator_credentials() -> tuple[str, str]:
+    env_api_key = os.getenv("OPENAI_API_KEY")
+    env_base_url = os.getenv("OPENAI_BASE_URL")
+    if env_api_key and env_base_url:
+        return env_api_key, env_base_url
+
     key_file_path = Path(__file__).resolve().parents[1] / "navigator_api_keys.json"
     if not key_file_path.exists():
         raise FileNotFoundError(
-            f"Could not find {key_file_path}. Create server/navigator_api_keys.json first."
+            "Missing LLM credentials. Set OPENAI_API_KEY and OPENAI_BASE_URL, "
+            f"or create {key_file_path} for local development."
         )
 
     with key_file_path.open("r", encoding="utf-8") as file:

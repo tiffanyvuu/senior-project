@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-const defaultApiBase = "http://127.0.0.1:8000/v1";
+const defaultApiBase =
+  import.meta.env.VITE_API_BASE_URL?.trim() || "http://127.0.0.1:8000/v1";
 
 const starterMessages = [
   {
