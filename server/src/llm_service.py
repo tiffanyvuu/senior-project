@@ -13,7 +13,8 @@ from src.feedback_policy import FeedbackClass
 from src.settings import get_navigator_model
 
 DEFAULT_LLM_TIMEOUT_S = 30.0
-MAX_STUDENT_RESPONSE_SENTENCES = 2
+MAX_STUDENT_RESPONSE_SENTENCES = 1
+MAX_STUDENT_RESPONSE_WORDS = 22
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -95,10 +96,14 @@ def enforce_student_response_length(response_text: str) -> str:
         if len(sentences) == MAX_STUDENT_RESPONSE_SENTENCES:
             break
 
-    if not sentences:
-        return normalized_text
+    trimmed_text = " ".join(sentences) if sentences else normalized_text
+    words = trimmed_text.split()
+    if len(words) > MAX_STUDENT_RESPONSE_WORDS:
+        trimmed_text = " ".join(words[:MAX_STUDENT_RESPONSE_WORDS]).rstrip(" ,;:")
+        if trimmed_text and trimmed_text[-1] not in ".!?":
+            trimmed_text = f"{trimmed_text}."
 
-    return " ".join(sentences)
+    return trimmed_text
 
 
 def generate_robot_behavior_summary(task: str, raw_logs: str) -> dict[str, str]:
