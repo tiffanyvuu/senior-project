@@ -112,7 +112,7 @@ function clamp(value, min, max) {
 
 function getDefaultPanelRect() {
   const width = 460;
-  const height = 760;
+  const height = 680;
   return {
     x: Math.max(12, window.innerWidth - width - 24),
     y: 32,
@@ -497,8 +497,24 @@ function App() {
                 >
                   {pendingAction === "help" ? "Sending..." : "Help"}
                 </button>
+                <button
+                  type="button"
+                  className="chat-close-button"
+                  onClick={() => setIsChatOpen(false)}
+                >
+                  Hide
+                </button>
               </div>
             </header>
+          ) : null}
+          {!studentId ? (
+            <button
+              type="button"
+              className="chat-close-button chat-close-button-floating"
+              onClick={() => setIsChatOpen(false)}
+            >
+              Hide
+            </button>
           ) : null}
 
         <div className="workspace workspace-overlay">
@@ -658,17 +674,22 @@ function App() {
             onPointerDown={startResize}
             aria-label="Resize chat"
             title="Resize chat"
-          />
+          >
+            <span className="resize-handle-label">Resize</span>
+            <span className="resize-handle-grip" aria-hidden="true" />
+          </button>
         </section>
       ) : null}
 
-      <button
-        type="button"
-        className="chat-launcher"
-        onClick={() => setIsChatOpen((current) => !current)}
-      >
-        {isChatOpen ? "Hide Chat" : "Open Chat"}
-      </button>
+      {!isChatOpen ? (
+        <button
+          type="button"
+          className="chat-launcher"
+          onClick={() => setIsChatOpen(true)}
+        >
+          Open Chat
+        </button>
+      ) : null}
     </main>
   );
 }

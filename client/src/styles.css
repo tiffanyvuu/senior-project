@@ -59,6 +59,24 @@ button {
   backdrop-filter: blur(10px);
 }
 
+.chat-close-button {
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.chat-close-button-floating {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  background: rgba(8, 117, 226, 0.92);
+  border-color: rgba(8, 117, 226, 0.95);
+}
+
 .chat-overlay-start {
   grid-template-rows: minmax(0, 1fr);
   background:
@@ -419,15 +437,39 @@ button {
 
 .resize-handle {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 24px;
-  height: 24px;
-  background:
-    linear-gradient(135deg, transparent 0 45%, rgba(8, 117, 226, 0.6) 45% 55%, transparent 55% 100%),
-    linear-gradient(135deg, transparent 0 65%, rgba(8, 117, 226, 0.8) 65% 75%, transparent 75% 100%);
+  right: 16px;
+  bottom: 16px;
+  z-index: 5;
+  width: 96px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.7rem;
+  border-radius: 999px;
+  background: rgba(8, 117, 226, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #ffffff;
   cursor: nwse-resize;
-  opacity: 0.9;
+  opacity: 0.96;
+  box-shadow: 0 10px 18px rgba(33, 66, 102, 0.18);
+}
+
+.resize-handle-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.resize-handle-grip {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  background:
+    linear-gradient(135deg, transparent 0 30%, rgba(255, 255, 255, 0.45) 30% 40%, transparent 40% 100%),
+    linear-gradient(135deg, transparent 0 50%, rgba(255, 255, 255, 0.72) 50% 60%, transparent 60% 100%),
+    linear-gradient(135deg, transparent 0 70%, rgba(255, 255, 255, 0.95) 70% 80%, transparent 80% 100%);
 }
 
 .chat-launcher {
