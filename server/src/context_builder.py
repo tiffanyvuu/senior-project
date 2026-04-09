@@ -327,8 +327,9 @@ OUTPUT RULES
 - Output only the feedback message.
 - Do not include labels, explanations, bullet points, or quotation marks.
 - Prefer one bite-sized hint or explanation over a full paragraph.
-- Never exceed 2 sentences.
-- Keep it to 1-2 short sentences.
+- Keep it to exactly 1 short sentence.
+- Aim for about 10-18 words when possible.
+- Never exceed 22 words.
 """
 
 ROBOT_BEHAVIOR_PROMPT_TEMPLATE = """You are an expert in VEXcode VR. I will give you log data. ONLY tell me what the robot does.
