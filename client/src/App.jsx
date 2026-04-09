@@ -106,6 +106,17 @@ function renderMessageBody(text) {
   return elements;
 }
 
+function createPendingAssistantMessage() {
+  return {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    body: "",
+    meta: "Thinking...",
+    canFeedback: false,
+    isLoading: true,
+  };
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -344,8 +355,10 @@ function App() {
       body: trimmedDraft,
       meta: "Sending",
     };
+    const pendingAssistantMessage = createPendingAssistantMessage();
 
     appendMessage(optimisticMessage);
+    appendMessage(pendingAssistantMessage);
     setDraft("");
     setPendingAction("message");
 
@@ -370,15 +383,17 @@ function App() {
                   ...message,
                   meta: "Sent",
                 }
-              : message,
+              : message.id === pendingAssistantMessage.id
+                ? {
+                    id: responseRecord.response_id,
+                    role: "assistant",
+                    body: responseRecord.response_text,
+                    meta: responseRecord.llm_model || "Generated response",
+                    canFeedback: true,
+                    isLoading: false,
+                  }
+                : message,
           ),
-          {
-            id: responseRecord.response_id,
-            role: "assistant",
-            body: responseRecord.response_text,
-            meta: responseRecord.llm_model || "Generated response",
-            canFeedback: true,
-          },
         ],
       );
     } catch (error) {
@@ -389,6 +404,13 @@ function App() {
                 ...message,
                 meta: `Failed to send: ${error.message}`,
               }
+            : message.id === pendingAssistantMessage.id
+              ? {
+                  ...message,
+                  body: "The agent ran into a delay. Try asking again in a moment.",
+                  meta: `Failed: ${error.message}`,
+                  isLoading: false,
+                }
             : message,
         ),
       );
@@ -404,8 +426,10 @@ function App() {
       body: "Help",
       meta: "Sending",
     };
+    const pendingAssistantMessage = createPendingAssistantMessage();
 
     appendMessage(helpMessage);
+    appendMessage(pendingAssistantMessage);
     setPendingAction("help");
 
     try {
@@ -429,35 +453,36 @@ function App() {
                   ...message,
                   meta: "Sent",
                 }
-              : message,
+              : message.id === pendingAssistantMessage.id
+                ? {
+                    id: responseRecord.response_id,
+                    role: "assistant",
+                    body: responseRecord.response_text,
+                    meta: responseRecord.llm_model || "Generated response",
+                    canFeedback: true,
+                    isLoading: false,
+                  }
+                : message,
           ),
-          {
-            id: responseRecord.response_id,
-            role: "assistant",
-            body: responseRecord.response_text,
-            meta: responseRecord.llm_model || "Generated response",
-            canFeedback: true,
-          },
         ],
       );
     } catch (error) {
       setMessages((current) =>
-        [
-          ...current.map((message) =>
-            message.id === helpMessage.id
+        current.map((message) =>
+          message.id === helpMessage.id
+            ? {
+                ...message,
+                meta: `Failed to send: ${error.message}`,
+              }
+            : message.id === pendingAssistantMessage.id
               ? {
                   ...message,
+                  body: "Help could not be sent right now.",
                   meta: `Failed to send: ${error.message}`,
+                  isLoading: false,
                 }
               : message,
-          ),
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            body: "Help could not be sent right now.",
-            meta: `Failed to send: ${error.message}`,
-          },
-        ],
+        ),
       );
     } finally {
       setPendingAction("");
@@ -564,7 +589,20 @@ function App() {
                     <div className="message-label">
                       {message.role === "student" ? "You" : "Agent"}
                     </div>
-                    <div className="message-body-wrap">{renderMessageBody(message.body)}</div>
+                    <div className="message-body-wrap">
+                      {message.isLoading ? (
+                        <div className="thinking-indicator" aria-label="Agent is thinking">
+                          <span className="thinking-text">Agent is thinking</span>
+                          <span className="thinking-dots" aria-hidden="true">
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        </div>
+                      ) : (
+                        renderMessageBody(message.body)
+                      )}
+                    </div>
                     <span className="message-meta">{message.meta}</span>
                     {message.role === "assistant" && message.canFeedback ? (
                       <div className="feedback-panel">
