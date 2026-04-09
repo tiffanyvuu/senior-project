@@ -149,6 +149,41 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const PANEL_MIN_WIDTH = 360;
+const PANEL_MIN_HEIGHT = 520;
+const PANEL_CORNER_RESIZE_MARGIN = 18;
+
+function getResizeHandle(clientX, clientY, rect) {
+  const nearLeft = Math.abs(clientX - rect.x) <= PANEL_CORNER_RESIZE_MARGIN;
+  const nearRight = Math.abs(clientX - (rect.x + rect.width)) <= PANEL_CORNER_RESIZE_MARGIN;
+  const nearTop = Math.abs(clientY - rect.y) <= PANEL_CORNER_RESIZE_MARGIN;
+  const nearBottom = Math.abs(clientY - (rect.y + rect.height)) <= PANEL_CORNER_RESIZE_MARGIN;
+
+  if (nearRight && nearBottom) {
+    return "se";
+  }
+  if (nearLeft && nearBottom) {
+    return "sw";
+  }
+  if (nearLeft && nearTop) {
+    return "nw";
+  }
+  if (nearRight && nearTop) {
+    return "ne";
+  }
+  return null;
+}
+
+function getCursorForResizeHandle(handle) {
+  if (handle === "ne" || handle === "sw") {
+    return "nesw-resize";
+  }
+  if (handle === "nw" || handle === "se") {
+    return "nwse-resize";
+  }
+  return "";
+}
+
 function getDefaultPanelRect() {
   const width = 460;
   const height = 680;
@@ -173,10 +208,25 @@ function App() {
   const [pendingFeedback, setPendingFeedback] = useState({});
   const [panelRect, setPanelRect] = useState(getDefaultPanelRect);
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const [isInteractingWithPanel, setIsInteractingWithPanel] = useState(false);
+  const [hoveredResizeHandle, setHoveredResizeHandle] = useState(null);
   const interactionRef = useRef(null);
+  const panelRef = useRef(null);
   const apiBase = defaultApiBase;
 
   useEffect(() => {
+    const endInteraction = () => {
+      const pointerId = interactionRef.current?.pointerId;
+      if (pointerId !== undefined) {
+        try {
+          panelRef.current?.releasePointerCapture(pointerId);
+        } catch {}
+      }
+      interactionRef.current = null;
+      setHoveredResizeHandle(null);
+      setIsInteractingWithPanel(false);
+    };
+
     const handlePointerMove = (event) => {
       const interaction = interactionRef.current;
       if (!interaction) {
@@ -205,36 +255,78 @@ function App() {
       }
 
       if (interaction.type === "resize") {
-        const nextRight = event.clientX + interaction.cornerOffsetX;
-        const nextBottom = event.clientY + interaction.cornerOffsetY;
-        const nextWidth = clamp(
-          nextRight - interaction.startRect.x,
-          360,
-          window.innerWidth - interaction.startRect.x - 12,
-        );
-        const nextHeight = clamp(
-          nextBottom - interaction.startRect.y,
-          520,
-          window.innerHeight - interaction.startRect.y - 12,
-        );
-        setPanelRect((current) => ({
-          ...current,
+        const deltaX = event.clientX - interaction.startPointerX;
+        const deltaY = event.clientY - interaction.startPointerY;
+        const startRight = interaction.startRect.x + interaction.startRect.width;
+        const startBottom = interaction.startRect.y + interaction.startRect.height;
+        const maxWidthFromLeft = window.innerWidth - interaction.startRect.x - 12;
+        const maxHeightFromTop = window.innerHeight - interaction.startRect.y - 12;
+        const maxWidthFromRight = startRight - 12;
+        const maxHeightFromBottom = startBottom - 12;
+
+        let nextX = interaction.startRect.x;
+        let nextY = interaction.startRect.y;
+        let nextWidth = interaction.startRect.width;
+        let nextHeight = interaction.startRect.height;
+
+        if (interaction.handle === "se" || interaction.handle === "ne") {
+          nextWidth = clamp(
+            interaction.startRect.width + deltaX,
+            PANEL_MIN_WIDTH,
+            maxWidthFromLeft,
+          );
+        }
+        if (interaction.handle === "sw" || interaction.handle === "nw") {
+          nextWidth = clamp(
+            interaction.startRect.width - deltaX,
+            PANEL_MIN_WIDTH,
+            maxWidthFromRight,
+          );
+          nextX = startRight - nextWidth;
+        }
+        if (interaction.handle === "se" || interaction.handle === "sw") {
+          nextHeight = clamp(
+            interaction.startRect.height + deltaY,
+            PANEL_MIN_HEIGHT,
+            maxHeightFromTop,
+          );
+        }
+        if (interaction.handle === "ne" || interaction.handle === "nw") {
+          nextHeight = clamp(
+            interaction.startRect.height - deltaY,
+            PANEL_MIN_HEIGHT,
+            maxHeightFromBottom,
+          );
+          nextY = startBottom - nextHeight;
+        }
+
+        setPanelRect({
+          x: nextX,
+          y: nextY,
           width: nextWidth,
           height: nextHeight,
-        }));
+        });
       }
     };
 
     const handlePointerUp = () => {
-      interactionRef.current = null;
+      endInteraction();
+    };
+
+    const handleWindowBlur = () => {
+      endInteraction();
     };
 
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("blur", handleWindowBlur);
 
     return () => {
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
+      window.removeEventListener("blur", handleWindowBlur);
     };
   }, []);
 
@@ -242,22 +334,57 @@ function App() {
     if (event.target.closest("button, textarea, input")) {
       return;
     }
+    setIsInteractingWithPanel(true);
+    try {
+      panelRef.current?.setPointerCapture(event.pointerId);
+    } catch {}
     interactionRef.current = {
       type: "drag",
+      pointerId: event.pointerId,
       offsetX: event.clientX - panelRect.x,
       offsetY: event.clientY - panelRect.y,
     };
   };
 
-  const startResize = (event) => {
-    event.preventDefault();
+  const handlePanelPointerMove = (event) => {
+    if (interactionRef.current) {
+      return;
+    }
+    setHoveredResizeHandle(
+      getResizeHandle(event.clientX, event.clientY, panelRect),
+    );
+  };
+
+  const handlePanelPointerLeave = () => {
+    if (interactionRef.current) {
+      return;
+    }
+    setHoveredResizeHandle(null);
+  };
+
+  const handlePanelPointerDownCapture = (event) => {
+    if (event.target.closest("button, textarea, input")) {
+      return;
+    }
+
+    const resizeHandle = getResizeHandle(event.clientX, event.clientY, panelRect);
+    if (!resizeHandle) {
+      return;
+    }
+
+    setHoveredResizeHandle(resizeHandle);
+    setIsInteractingWithPanel(true);
     event.stopPropagation();
-    const cornerX = panelRect.x + panelRect.width;
-    const cornerY = panelRect.y + panelRect.height;
+    event.preventDefault();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {}
     interactionRef.current = {
       type: "resize",
-      cornerOffsetX: cornerX - event.clientX,
-      cornerOffsetY: cornerY - event.clientY,
+      pointerId: event.pointerId,
+      handle: resizeHandle,
+      startPointerX: event.clientX,
+      startPointerY: event.clientY,
       startRect: { ...panelRect },
     };
   };
@@ -534,19 +661,24 @@ function App() {
   return (
     <main className="overlay-shell">
       <iframe
-        className="background-frame"
+        className={`background-frame ${isInteractingWithPanel ? "background-frame-inactive" : ""}`}
         src="https://research-vr.vex.com/"
         title="Research VR"
       />
 
       {isChatOpen ? (
         <section
+          ref={panelRef}
           className={`chat-overlay ${!studentId ? "chat-overlay-start" : ""}`}
+          onPointerDownCapture={handlePanelPointerDownCapture}
+          onPointerMove={handlePanelPointerMove}
+          onPointerLeave={handlePanelPointerLeave}
           style={{
             left: `${panelRect.x}px`,
             top: `${panelRect.y}px`,
             width: `${panelRect.width}px`,
             height: `${panelRect.height}px`,
+            cursor: getCursorForResizeHandle(hoveredResizeHandle),
           }}
         >
           {studentId ? (
@@ -568,8 +700,13 @@ function App() {
                   type="button"
                   className="chat-close-button"
                   onClick={() => setIsChatOpen(false)}
+                  aria-label="Collapse chat"
+                  title="Collapse chat"
                 >
-                  Hide
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="chat-close-icon">
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                  <span className="chat-close-text">Collapse</span>
                 </button>
               </div>
             </header>
@@ -579,8 +716,13 @@ function App() {
               type="button"
               className="chat-close-button chat-close-button-floating"
               onClick={() => setIsChatOpen(false)}
+              aria-label="Collapse chat"
+              title="Collapse chat"
             >
-              Hide
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="chat-close-icon">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+              <span className="chat-close-text">Collapse</span>
             </button>
           ) : null}
 
@@ -752,16 +894,6 @@ function App() {
             </div>
           </form>
         ) : null}
-          <button
-            type="button"
-            className="resize-handle"
-            onPointerDown={startResize}
-            aria-label="Resize chat"
-            title="Resize chat"
-          >
-            <span className="resize-handle-label">Resize</span>
-            <span className="resize-handle-grip" aria-hidden="true" />
-          </button>
         </section>
       ) : null}
 
