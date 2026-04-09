@@ -107,13 +107,51 @@ function renderMessageBody(text) {
   return elements;
 }
 
+function createPendingAssistantMessage() {
+  return {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    body: "",
+    meta: "Thinking...",
+    canFeedback: false,
+    isLoading: true,
+  };
+}
+
+function MessageAvatar({ role }) {
+  if (role === "student") {
+    return (
+      <div className="message-avatar message-avatar-student" aria-hidden="true">
+        <svg viewBox="0 0 48 48" className="message-avatar-svg">
+          <circle cx="24" cy="18" r="9" />
+          <path d="M10 40c2.8-7.4 9.1-11 14-11s11.2 3.6 14 11" />
+        </svg>
+      </div>
+    );
+  }
+
+  return (
+    <div className="message-avatar message-avatar-agent" aria-hidden="true">
+      <svg viewBox="0 0 48 48" className="message-avatar-svg">
+        <rect x="11" y="14" width="26" height="20" rx="6" />
+        <circle cx="19" cy="24" r="2.8" />
+        <circle cx="29" cy="24" r="2.8" />
+        <path d="M18 31h12" />
+        <path d="M24 8v6" />
+        <path d="M14 38v4" />
+        <path d="M34 38v4" />
+      </svg>
+    </div>
+  );
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
 function getDefaultPanelRect() {
   const width = 460;
-  const height = 760;
+  const height = 680;
   return {
     x: Math.max(12, window.innerWidth - width - 24),
     y: 32,
@@ -331,6 +369,20 @@ function App() {
     setSessionId(trimmedSessionId || "Detecting latest session");
   };
 
+  const handleComposerKeyDown = (event) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (pendingAction === "message" || !draft.trim()) {
+      return;
+    }
+
+    event.currentTarget.form?.requestSubmit();
+  };
+
   const handleSend = async (event) => {
     event.preventDefault();
 
@@ -345,8 +397,10 @@ function App() {
       body: trimmedDraft,
       meta: "Sending",
     };
+    const pendingAssistantMessage = createPendingAssistantMessage();
 
     appendMessage(optimisticMessage);
+    appendMessage(pendingAssistantMessage);
     setDraft("");
     setPendingAction("message");
 
@@ -371,15 +425,17 @@ function App() {
                   ...message,
                   meta: "Sent",
                 }
-              : message,
+              : message.id === pendingAssistantMessage.id
+                ? {
+                    id: responseRecord.response_id,
+                    role: "assistant",
+                    body: responseRecord.response_text,
+                    meta: responseRecord.llm_model || "Generated response",
+                    canFeedback: true,
+                    isLoading: false,
+                  }
+                : message,
           ),
-          {
-            id: responseRecord.response_id,
-            role: "assistant",
-            body: responseRecord.response_text,
-            meta: responseRecord.llm_model || "Generated response",
-            canFeedback: true,
-          },
         ],
       );
     } catch (error) {
@@ -390,6 +446,13 @@ function App() {
                 ...message,
                 meta: `Failed to send: ${error.message}`,
               }
+            : message.id === pendingAssistantMessage.id
+              ? {
+                  ...message,
+                  body: "The agent ran into a delay. Try asking again in a moment.",
+                  meta: `Failed: ${error.message}`,
+                  isLoading: false,
+                }
             : message,
         ),
       );
@@ -405,8 +468,10 @@ function App() {
       body: "Help",
       meta: "Sending",
     };
+    const pendingAssistantMessage = createPendingAssistantMessage();
 
     appendMessage(helpMessage);
+    appendMessage(pendingAssistantMessage);
     setPendingAction("help");
 
     try {
@@ -430,35 +495,36 @@ function App() {
                   ...message,
                   meta: "Sent",
                 }
-              : message,
+              : message.id === pendingAssistantMessage.id
+                ? {
+                    id: responseRecord.response_id,
+                    role: "assistant",
+                    body: responseRecord.response_text,
+                    meta: responseRecord.llm_model || "Generated response",
+                    canFeedback: true,
+                    isLoading: false,
+                  }
+                : message,
           ),
-          {
-            id: responseRecord.response_id,
-            role: "assistant",
-            body: responseRecord.response_text,
-            meta: responseRecord.llm_model || "Generated response",
-            canFeedback: true,
-          },
         ],
       );
     } catch (error) {
       setMessages((current) =>
-        [
-          ...current.map((message) =>
-            message.id === helpMessage.id
+        current.map((message) =>
+          message.id === helpMessage.id
+            ? {
+                ...message,
+                meta: `Failed to send: ${error.message}`,
+              }
+            : message.id === pendingAssistantMessage.id
               ? {
                   ...message,
+                  body: "Help could not be sent right now.",
                   meta: `Failed to send: ${error.message}`,
+                  isLoading: false,
                 }
               : message,
-          ),
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            body: "Help could not be sent right now.",
-            meta: `Failed to send: ${error.message}`,
-          },
-        ],
+        ),
       );
     } finally {
       setPendingAction("");
@@ -498,8 +564,24 @@ function App() {
                 >
                   {pendingAction === "help" ? "Sending..." : "Help"}
                 </button>
+                <button
+                  type="button"
+                  className="chat-close-button"
+                  onClick={() => setIsChatOpen(false)}
+                >
+                  Hide
+                </button>
               </div>
             </header>
+          ) : null}
+          {!studentId ? (
+            <button
+              type="button"
+              className="chat-close-button chat-close-button-floating"
+              onClick={() => setIsChatOpen(false)}
+            >
+              Hide
+            </button>
           ) : null}
 
         <div className="workspace workspace-overlay">
@@ -545,88 +627,104 @@ function App() {
                   key={message.id}
                   className={`message-row ${message.role === "student" ? "outgoing" : "incoming"}`}
                 >
-                  <div className="message-bubble">
-                    <div className="message-label">
-                      {message.role === "student" ? "You" : "Agent"}
-                    </div>
-                    <div className="message-body-wrap">{renderMessageBody(message.body)}</div>
-                    <span className="message-meta">{message.meta}</span>
-                    {message.role === "assistant" && message.canFeedback ? (
-                      <div className="feedback-panel">
-                        <div className="feedback-actions">
-                          <button
-                            type="button"
-                            className={`icon-button ${message.selectedThumb === "up" ? "selected" : ""}`}
-                            onClick={() => handleFeedback(message.id, "up")}
-                            disabled={Boolean(pendingFeedback[message.id])}
-                            aria-label="Thumbs up"
-                            title="Thumbs up"
-                          >
-                            {pendingFeedback[message.id] === "up" ? (
-                              "..."
-                            ) : (
-                              <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M10 21H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h4v11Zm2-11 2.6-6.1A1.5 1.5 0 0 1 16 3a2 2 0 0 1 2 2v4h2.7a2 2 0 0 1 2 2.4l-1.2 6A2 2 0 0 1 19.5 19H12V10Z" />
-                              </svg>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className={`icon-button ${message.selectedThumb === "down" ? "selected" : ""}`}
-                            onClick={() => handleFeedback(message.id, "down")}
-                            disabled={Boolean(pendingFeedback[message.id])}
-                            aria-label="Thumbs down"
-                            title="Thumbs down"
-                          >
-                            {pendingFeedback[message.id] === "down" ? (
-                              "..."
-                            ) : (
-                              <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M14 3h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4V3Zm-2 11-2.6 6.1A1.5 1.5 0 0 1 8 21a2 2 0 0 1-2-2v-4H3.3a2 2 0 0 1-2-2.4l1.2-6A2 2 0 0 1 4.5 5H12v9Z" />
-                              </svg>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            className="review-toggle"
-                            onClick={() =>
-                              setOpenReviews((current) => ({
-                                ...current,
-                                [message.id]: !current[message.id],
-                              }))
-                            }
-                          >
-                            {openReviews[message.id] ? "Hide Review" : "Add Review"}
-                          </button>
-                        </div>
-                        {openReviews[message.id] ? (
-                          <div className="review-form">
-                            <textarea
-                              rows="2"
-                              value={reviewDrafts[message.id] || ""}
-                              onChange={(event) =>
-                                setReviewDrafts((current) => ({
-                                  ...current,
-                                  [message.id]: event.target.value,
-                                }))
-                              }
-                              placeholder="Write a review if you want."
-                            />
+                  <MessageAvatar role={message.role} />
+                  <div className="message-card">
+                    <div className="message-bubble">
+                      <div className="message-label">
+                        {message.role === "student" ? "You" : "Guide Bot"}
+                      </div>
+                      <div className="message-body-wrap">
+                        {message.isLoading ? (
+                          <div className="thinking-indicator" aria-label="Agent is thinking">
+                            <span className="thinking-text">Guide Bot is thinking</span>
+                            <span className="thinking-dots" aria-hidden="true">
+                              <span />
+                              <span />
+                              <span />
+                            </span>
+                          </div>
+                        ) : (
+                          renderMessageBody(message.body)
+                        )}
+                      </div>
+                      <span className="message-meta">{message.meta}</span>
+                      {message.role === "assistant" && message.canFeedback ? (
+                        <div className="feedback-panel">
+                          <div className="feedback-actions">
                             <button
                               type="button"
-                              className="send-review"
-                              onClick={() => handleReviewSubmit(message.id)}
+                              className={`icon-button ${message.selectedThumb === "up" ? "selected" : ""}`}
+                              onClick={() => handleFeedback(message.id, "up")}
                               disabled={Boolean(pendingFeedback[message.id])}
+                              aria-label="Thumbs up"
+                              title="Thumbs up"
                             >
-                              {pendingFeedback[message.id] === "review" ? "Sending..." : "Send Review"}
+                              {pendingFeedback[message.id] === "up" ? (
+                                "..."
+                              ) : (
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M10 21H6a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h4v11Zm2-11 2.6-6.1A1.5 1.5 0 0 1 16 3a2 2 0 0 1 2 2v4h2.7a2 2 0 0 1 2 2.4l-1.2 6A2 2 0 0 1 19.5 19H12V10Z" />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className={`icon-button ${message.selectedThumb === "down" ? "selected" : ""}`}
+                              onClick={() => handleFeedback(message.id, "down")}
+                              disabled={Boolean(pendingFeedback[message.id])}
+                              aria-label="Thumbs down"
+                              title="Thumbs down"
+                            >
+                              {pendingFeedback[message.id] === "down" ? (
+                                "..."
+                              ) : (
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                  <path d="M14 3h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-4V3Zm-2 11-2.6 6.1A1.5 1.5 0 0 1 8 21a2 2 0 0 1-2-2v-4H3.3a2 2 0 0 1-2-2.4l1.2-6A2 2 0 0 1 4.5 5H12v9Z" />
+                                </svg>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              className="review-toggle"
+                              onClick={() =>
+                                setOpenReviews((current) => ({
+                                  ...current,
+                                  [message.id]: !current[message.id],
+                                }))
+                              }
+                            >
+                              {openReviews[message.id] ? "Hide Review" : "Add Review"}
                             </button>
                           </div>
-                        ) : null}
-                        {message.feedbackStatus ? (
-                          <div className="feedback-status">{message.feedbackStatus}</div>
-                        ) : null}
-                      </div>
-                    ) : null}
+                          {openReviews[message.id] ? (
+                            <div className="review-form">
+                              <textarea
+                                rows="2"
+                                value={reviewDrafts[message.id] || ""}
+                                onChange={(event) =>
+                                  setReviewDrafts((current) => ({
+                                    ...current,
+                                    [message.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder="Write a review if you want."
+                              />
+                              <button
+                                type="button"
+                                className="send-review"
+                                onClick={() => handleReviewSubmit(message.id)}
+                                disabled={Boolean(pendingFeedback[message.id])}
+                              >
+                                {pendingFeedback[message.id] === "review" ? "Sending..." : "Send Review"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {message.feedbackStatus ? (
+                            <div className="feedback-status">{message.feedbackStatus}</div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               ))}
@@ -644,6 +742,7 @@ function App() {
               rows="3"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
               placeholder="Ask about your program, your bug, or what to try next."
             />
             <div className="composer-footer">
@@ -659,17 +758,22 @@ function App() {
             onPointerDown={startResize}
             aria-label="Resize chat"
             title="Resize chat"
-          />
+          >
+            <span className="resize-handle-label">Resize</span>
+            <span className="resize-handle-grip" aria-hidden="true" />
+          </button>
         </section>
       ) : null}
 
-      <button
-        type="button"
-        className="chat-launcher"
-        onClick={() => setIsChatOpen((current) => !current)}
-      >
-        {isChatOpen ? "Hide Chat" : "Open Chat"}
-      </button>
+      {!isChatOpen ? (
+        <button
+          type="button"
+          className="chat-launcher"
+          onClick={() => setIsChatOpen(true)}
+        >
+          Open Chat
+        </button>
+      ) : null}
     </main>
   );
 }
