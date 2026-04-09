@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import openai
@@ -12,6 +13,8 @@ from src.feedback_policy import FeedbackClass
 from src.settings import get_navigator_model
 
 DEFAULT_LLM_TIMEOUT_S = 30.0
+MAX_STUDENT_RESPONSE_SENTENCES = 2
+SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+")
 
 
 def prepare_main_llm_request(
@@ -72,6 +75,26 @@ def execute_prompt(*, model: str, prompt: str) -> str:
     return response.choices[0].message.content
 
 
+def enforce_student_response_length(response_text: str) -> str:
+    normalized_text = " ".join((response_text or "").split())
+    if not normalized_text:
+        return ""
+
+    sentences = []
+    for sentence in SENTENCE_SPLIT_PATTERN.split(normalized_text):
+        cleaned_sentence = sentence.strip()
+        if not cleaned_sentence:
+            continue
+        sentences.append(cleaned_sentence)
+        if len(sentences) == MAX_STUDENT_RESPONSE_SENTENCES:
+            break
+
+    if not sentences:
+        return normalized_text
+
+    return " ".join(sentences)
+
+
 def generate_robot_behavior_summary(task: str, raw_logs: str) -> dict[str, str]:
     model = get_navigator_model()
     prompt = build_robot_behavior_prompt(
@@ -106,6 +129,7 @@ def generate_main_llm_response(
         model=llm_request["model"],
         prompt=llm_request["prompt"],
     )
+    response_text = enforce_student_response_length(response_text)
     return {
         "model": llm_request["model"],
         "prompt": llm_request["prompt"],
