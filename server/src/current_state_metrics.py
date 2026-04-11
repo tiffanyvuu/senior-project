@@ -129,8 +129,11 @@ def parse_dt(value: Any) -> datetime:
 def normalize_playground(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    normalized = "".join(ch for ch in value.upper() if ch.isalnum())
-    return ALLOWED_PLAYGROUNDS.get(normalized)
+    stripped = value.strip()
+    if not stripped:
+        return None
+    normalized = "".join(ch for ch in stripped.upper() if ch.isalnum())
+    return ALLOWED_PLAYGROUNDS.get(normalized, stripped)
 
 
 def canonical_playground_from_payload(

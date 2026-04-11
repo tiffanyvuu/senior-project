@@ -210,8 +210,10 @@ function App() {
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [isInteractingWithPanel, setIsInteractingWithPanel] = useState(false);
   const [hoveredResizeHandle, setHoveredResizeHandle] = useState(null);
-  const interactionRef = useRef(null);
   const panelRef = useRef(null);
+  const interactionRef = useRef(null);
+  const messageListRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const apiBase = defaultApiBase;
 
   useEffect(() => {
@@ -329,6 +331,21 @@ function App() {
       window.removeEventListener("blur", handleWindowBlur);
     };
   }, []);
+
+  useEffect(() => {
+    if (!studentId || !isChatOpen) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ block: "end" });
+      if (messageListRef.current) {
+        messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [messages, isChatOpen, studentId]);
 
   const startDrag = (event) => {
     if (event.target.closest("button, textarea, input")) {
@@ -763,7 +780,7 @@ function App() {
               </section>
             </div>
           ) : (
-            <section className="message-list" aria-label="Conversation">
+            <section className="message-list" aria-label="Conversation" ref={messageListRef}>
               {messages.map((message) => (
                 <article
                   key={message.id}
@@ -870,6 +887,7 @@ function App() {
                   </div>
                 </article>
               ))}
+              <div ref={messagesEndRef} aria-hidden="true" />
             </section>
           )}
         </div>
