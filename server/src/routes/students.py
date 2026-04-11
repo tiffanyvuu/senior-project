@@ -1,4 +1,5 @@
 import logging
+from time import monotonic
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException
@@ -9,6 +10,7 @@ from src.current_state_metrics import (
     compute_snapshot_for_student_session,
     fetch_events_from_db,
     has_active_project_run,
+    select_current_playground_segment,
 )
 from src.db import (
     get_latest_session_id_for_student,
@@ -33,10 +35,17 @@ from src.task_catalog import resolve_task_description
 router = APIRouter(prefix="/v1", tags=["students"])
 logger = logging.getLogger(__name__)
 DEFAULT_PLAYGROUND = "GO-Mars"
+SESSION_CACHE_TTL_S = 60.0
+SYNC_COOLDOWN_S = 15.0
 ACTIVE_RUN_MESSAGE = (
     "Please stop your current run using the Stop button in the bottom-left of the playground, "
     "then ask for help again."
 )
+WRONG_PLAYGROUND_MESSAGE = (
+    "You are on the wrong playground right now. Switch to GO-Mars, then ask for help again."
+)
+_latest_session_cache: dict[str, tuple[str, float]] = {}
+_last_sync_at: dict[str, float] = {}
 
 
 def log_stage(stage: str, **fields: object) -> None:
@@ -45,7 +54,35 @@ def log_stage(stage: str, **fields: object) -> None:
     logger.info("\n".join(lines))
 
 
+def remember_latest_session(student_id: str, session_id: str) -> None:
+    _latest_session_cache[student_id] = (session_id, monotonic())
+
+
+def get_cached_session_id(student_id: str) -> str | None:
+    cached = _latest_session_cache.get(student_id)
+    if not cached:
+        return None
+    session_id, cached_at = cached
+    if monotonic() - cached_at > SESSION_CACHE_TTL_S:
+        _latest_session_cache.pop(student_id, None)
+        return None
+    return session_id
+
+
+def maybe_sync_invite_hub_logs(student_id: str) -> int:
+    last_sync_at = _last_sync_at.get(student_id)
+    now = monotonic()
+    if last_sync_at is not None and now - last_sync_at < SYNC_COOLDOWN_S:
+        return 0
+    synced_count = sync_invite_hub_logs(student_id=student_id)
+    _last_sync_at[student_id] = now
+    return synced_count
+
+
 def resolve_session_id_for_student(student_id: str) -> str:
+    cached_session_id = get_cached_session_id(student_id)
+    if cached_session_id is not None:
+        return cached_session_id
     session_id = get_latest_session_id_for_student(student_id)
     if session_id is None:
         raise HTTPException(
@@ -55,7 +92,18 @@ def resolve_session_id_for_student(student_id: str) -> str:
                 "Run the project once in VEX VR, then try again."
             ),
         )
+    remember_latest_session(student_id, session_id)
     return session_id
+
+
+def resolve_session_id_with_sync(student_id: str) -> tuple[str, int]:
+    try:
+        return resolve_session_id_for_student(student_id), 0
+    except HTTPException as error:
+        if error.status_code != 404:
+            raise
+    synced_log_count = maybe_sync_invite_hub_logs(student_id)
+    return resolve_session_id_for_student(student_id), synced_log_count
 
 @router.post("/students/{student_id}/messages", response_model=MessageResponse)
 def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
@@ -65,9 +113,9 @@ def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
     resolved_playground = payload.playground or DEFAULT_PLAYGROUND
     if payload.session_id:
         resolved_session_id = payload.session_id
+        remember_latest_session(student_id, resolved_session_id)
     else:
-        sync_invite_hub_logs(student_id=student_id)
-        resolved_session_id = resolve_session_id_for_student(student_id)
+        resolved_session_id, _ = resolve_session_id_with_sync(student_id)
     session_uuid = UUID(resolved_session_id)
     append_session_message(
         student_id=student_id,
@@ -121,13 +169,26 @@ def create_response(
     if task and payload.student_message:
         try:
             if resolved_session_id is None:
-                synced_log_count = sync_invite_hub_logs(student_id=student_id)
-                resolved_session_id = resolve_session_id_for_student(student_id)
+                resolved_session_id, synced_log_count = resolve_session_id_with_sync(student_id)
+            else:
+                remember_latest_session(student_id, resolved_session_id)
             events = fetch_events_from_db(
                 student_id=student_id,
                 session_id=resolved_session_id,
             )
-            if has_active_project_run(events):
+            current_playground, _ = select_current_playground_segment(events)
+            if current_playground != DEFAULT_PLAYGROUND:
+                response_text = WRONG_PLAYGROUND_MESSAGE
+                log_stage(
+                    "Wrong Playground Detected",
+                    student_id=student_id,
+                    session_id=resolved_session_id,
+                    synced_log_count=synced_log_count,
+                    current_playground=current_playground,
+                    expected_playground=DEFAULT_PLAYGROUND,
+                    message=response_text,
+                )
+            elif has_active_project_run(events):
                 response_text = ACTIVE_RUN_MESSAGE
                 log_stage(
                     "Active Run Detected",
