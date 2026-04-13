@@ -198,6 +198,9 @@ Robot behavior summary from the raw logs:
 Recent chat in this session:
 {recent_chat}
 
+Most recent assistant question in this session:
+{latest_assistant_question}
+
 Feedback types to use:
 {feedback_types}
 
@@ -215,15 +218,18 @@ INSTRUCTIONS
 Use these sources in this priority order:
 1. Student message
 2. Robot behavior summary from the raw logs
-3. Recent chat
-4. Task
-5. Feedback type descriptions/examples/notes
+3. Most recent assistant question
+4. Recent chat
+5. Task
+6. Feedback type descriptions/examples/notes
 
 Before writing feedback:
 - Use the robot behavior summary to understand what the robot is doing.
 - Only mention a block if the logs give enough evidence that it is currently on the workspace.
 - If the logs do not clearly show a current block, do not guess or mention one.
 - Do not invent actions, errors, goals, or progress that are not supported by the inputs.
+- If the student's message is a short reply like "yes," "no," a number, or a few words, check whether it answers the most recent assistant question.
+- When the student is answering the assistant's earlier question, treat this turn as a follow-up to that exact question instead of a brand-new topic.
 
 How to write the feedback:
 - Write for a middle school student.
@@ -234,6 +240,7 @@ How to write the feedback:
 - Combine ALL listed feedback types into one cohesive message.
 - If the feedback types pull in different directions, blend them naturally into one message instead of forcing separate ideas.
 - Prefer the most immediately useful next step for the student.
+- If the student answered the assistant's earlier question, directly respond to that answer before adding the next helpful idea.
 
 Behavior rules:
 - Do not give an overall evaluation or grade.
@@ -274,6 +281,9 @@ Robot behavior summary from the raw logs:
 Recent chat in this session:
 {recent_chat}
 
+Most recent assistant question in this session:
+{latest_assistant_question}
+
 Feedback types to use:
 {feedback_types}
 
@@ -291,15 +301,18 @@ INSTRUCTIONS
 Use these sources in this priority order:
 1. Student message
 2. Robot behavior summary from the raw logs
-3. Recent chat
-4. Task
-5. Feedback type descriptions/examples/notes
+3. Most recent assistant question
+4. Recent chat
+5. Task
+6. Feedback type descriptions/examples/notes
 
 Before writing feedback:
 - Use the robot behavior summary to understand what the robot is doing.
 - Only mention a block if the logs give enough evidence that it is currently on the workspace.
 - If the logs do not clearly show a current block, do not guess or mention one.
 - Do not invent actions, errors, goals, or progress that are not supported by the inputs.
+- If the student's message is a short reply like "yes," "no," a number, or a few words, check whether it answers the most recent assistant question.
+- When the student is answering the assistant's earlier question, treat this turn as a follow-up to that exact question instead of a brand-new topic.
 
 How to write the feedback:
 - Write for a middle school student.
@@ -310,6 +323,7 @@ How to write the feedback:
 - Combine ALL listed feedback types into one cohesive message.
 - If the feedback types pull in different directions, blend them naturally into one message instead of forcing separate ideas.
 - Prefer the most immediately useful next step for the student.
+- If the student answered the assistant's earlier question, directly respond to that answer before adding the next helpful idea.
 
 Behavior rules:
 - Do not give an overall evaluation or grade.
@@ -338,12 +352,33 @@ Raw logs for this student and session:
 {raw_logs}
 """
 
+
+def find_latest_assistant_question(recent_messages: list[dict[str, str]]) -> str | None:
+    for message in reversed(recent_messages):
+        if message.get("role") != "assistant":
+            continue
+        content = " ".join((message.get("content") or "").split())
+        if "?" in content:
+            return content
+    return None
+
+
+def format_recent_chat(recent_messages: list[dict[str, str]]) -> str:
+    recent_chat = "\n".join(
+        f"{message['role'].capitalize()}: {message['content']}"
+        for message in recent_messages
+    )
+    if not recent_chat:
+        return "None"
+    return recent_chat
+
 def build_feedback_prompt(
     task: str,
     student_message: str,
     available_blocks: str,
     robot_behavior_summary: str,
     recent_chat: str,
+    latest_assistant_question: str,
     feedback_types: list[str],
     feedback_specs: dict,
 ) -> str:
@@ -370,6 +405,7 @@ def build_feedback_prompt(
         available_blocks=available_blocks,
         robot_behavior_summary=robot_behavior_summary,
         recent_chat=recent_chat,
+        latest_assistant_question=latest_assistant_question,
         feedback_types=feedback_types_text,
         descriptions=descriptions_text,
         examples=examples_text,
@@ -391,12 +427,10 @@ def build_feedback_prompt_from_classes(
         if feedback_type and feedback_type not in feedback_types:
             feedback_types.append(feedback_type)
 
-    recent_chat = "\n".join(
-        f"{message['role'].capitalize()}: {message['content']}"
-        for message in recent_messages
-    )
-    if not recent_chat:
-        recent_chat = "None"
+    recent_chat = format_recent_chat(recent_messages)
+    latest_assistant_question = find_latest_assistant_question(recent_messages)
+    if latest_assistant_question is None:
+        latest_assistant_question = "None"
 
     available_blocks_text = "\n".join(f"- {block}" for block in available_blocks or [])
     if not available_blocks_text:
@@ -408,6 +442,7 @@ def build_feedback_prompt_from_classes(
         available_blocks=available_blocks_text,
         robot_behavior_summary=robot_behavior_summary,
         recent_chat=recent_chat,
+        latest_assistant_question=latest_assistant_question,
         feedback_types=feedback_types,
         feedback_specs=FEEDBACK_SPECS,
     )
