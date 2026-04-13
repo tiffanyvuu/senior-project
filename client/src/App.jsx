@@ -502,6 +502,20 @@ function App() {
     }
   };
 
+  const handleReviewKeyDown = (event, responseId) => {
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (pendingFeedback[responseId]) {
+      return;
+    }
+
+    handleReviewSubmit(responseId);
+  };
+
   const handleStudentStart = (event) => {
     event.preventDefault();
     const trimmedStudentId = studentIdDraft.trim();
@@ -866,6 +880,7 @@ function App() {
                                     [message.id]: event.target.value,
                                   }))
                                 }
+                                onKeyDown={(event) => handleReviewKeyDown(event, message.id)}
                                 placeholder="Write a review if you want."
                               />
                               <button

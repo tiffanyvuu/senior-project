@@ -449,24 +449,32 @@ button {
 .feedback-actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
   margin-bottom: 0.5rem;
 }
 
 .feedback-actions button {
-  padding: 0.45rem 0.72rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.8rem;
   border: 1px solid rgba(120, 164, 204, 0.45);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.86);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
   color: #23364a;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  font-weight: 700;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+  box-shadow: 0 8px 16px rgba(38, 70, 104, 0.08);
 }
 
 .feedback-actions button.selected {
   background: rgb(119, 178, 255);
   border-color: rgb(96, 158, 239);
-  color: #23364a;
+  color: #163a5f;
+  box-shadow: 0 10px 18px rgba(67, 123, 197, 0.18);
 }
 
 .feedback-actions button:disabled {
@@ -475,12 +483,14 @@ button {
 }
 
 .icon-button {
-  width: 2.8rem;
-  height: 2.8rem;
+  width: 2.7rem;
+  height: 2.7rem;
+  min-height: 2.7rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0;
+  padding: 0.6rem;
+  flex: 0 0 auto;
 }
 
 .icon-button svg {
@@ -490,8 +500,8 @@ button {
 }
 
 .review-toggle {
-  background: rgba(255, 255, 255, 0.72);
-  font-weight: 700;
+  padding-inline: 0.85rem;
+  white-space: nowrap;
 }
 
 .feedback-panel textarea {
@@ -499,11 +509,12 @@ button {
   resize: vertical;
   min-height: 56px;
   border: 1px solid rgba(120, 164, 204, 0.45);
-  border-radius: 4px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.92);
   color: #23364a;
-  padding: 0.65rem 0.75rem;
+  padding: 0.8rem 0.95rem;
   outline: none;
+  box-shadow: inset 0 1px 2px rgba(38, 70, 104, 0.06);
 }
 
 .feedback-panel textarea:focus {
@@ -518,12 +529,14 @@ button {
 
 .send-review {
   justify-self: flex-end;
-  padding: 0.45rem 0.75rem;
+  min-height: 2.45rem;
+  padding: 0.5rem 0.8rem;
   border: 1px solid rgb(8, 117, 226);
-  border-radius: 4px;
+  border-radius: 999px;
   background: rgb(8, 117, 226);
   color: #ffffff;
   font-weight: 700;
+  box-shadow: 0 10px 18px rgba(8, 117, 226, 0.2);
 }
 
 .send-review:disabled {
