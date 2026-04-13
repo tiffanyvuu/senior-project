@@ -20,7 +20,6 @@ from src.db import (
 )
 from src.feedback_policy import FeedbackClass, determine_feedback_class
 from src.llm_service import generate_main_llm_response, generate_robot_behavior_summary
-from src.log_sync import sync_invite_hub_logs
 from src.schemas import (
     FeedbackRequest,
     FeedbackResponse,
@@ -36,7 +35,6 @@ router = APIRouter(prefix="/v1", tags=["students"])
 logger = logging.getLogger(__name__)
 DEFAULT_PLAYGROUND = "GO-Mars"
 SESSION_CACHE_TTL_S = 60.0
-SYNC_COOLDOWN_S = 15.0
 ACTIVE_RUN_MESSAGE = (
     "Please stop your current run using the Stop button in the bottom-left of the playground, "
     "then ask for help again."
@@ -45,7 +43,6 @@ WRONG_PLAYGROUND_MESSAGE = (
     "You are on the wrong playground right now. Switch to GO-Mars, then ask for help again."
 )
 _latest_session_cache: dict[str, tuple[str, float]] = {}
-_last_sync_at: dict[str, float] = {}
 
 
 def log_stage(stage: str, **fields: object) -> None:
@@ -69,16 +66,6 @@ def get_cached_session_id(student_id: str) -> str | None:
     return session_id
 
 
-def maybe_sync_invite_hub_logs(student_id: str) -> int:
-    last_sync_at = _last_sync_at.get(student_id)
-    now = monotonic()
-    if last_sync_at is not None and now - last_sync_at < SYNC_COOLDOWN_S:
-        return 0
-    synced_count = sync_invite_hub_logs(student_id=student_id)
-    _last_sync_at[student_id] = now
-    return synced_count
-
-
 def resolve_session_id_for_student(student_id: str) -> str:
     cached_session_id = get_cached_session_id(student_id)
     if cached_session_id is not None:
@@ -88,22 +75,13 @@ def resolve_session_id_for_student(student_id: str) -> str:
         raise HTTPException(
             status_code=404,
             detail=(
-                "No recent GO-Mars logs were found for this student. "
-                "Run the project once in VEX VR, then try again."
+                "No recent GO-Mars logs were found for this student yet. "
+                "Run the project once in VEX VR, then try again in a few seconds."
             ),
         )
     remember_latest_session(student_id, session_id)
     return session_id
 
-
-def resolve_session_id_with_sync(student_id: str) -> tuple[str, int]:
-    try:
-        return resolve_session_id_for_student(student_id), 0
-    except HTTPException as error:
-        if error.status_code != 404:
-            raise
-    synced_log_count = maybe_sync_invite_hub_logs(student_id)
-    return resolve_session_id_for_student(student_id), synced_log_count
 
 @router.post("/students/{student_id}/messages", response_model=MessageResponse)
 def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
@@ -115,7 +93,7 @@ def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
         resolved_session_id = payload.session_id
         remember_latest_session(student_id, resolved_session_id)
     else:
-        resolved_session_id, _ = resolve_session_id_with_sync(student_id)
+        resolved_session_id = resolve_session_id_for_student(student_id)
     session_uuid = UUID(resolved_session_id)
     append_session_message(
         student_id=student_id,
@@ -160,7 +138,6 @@ def create_response(
     llm_request = None
     response_text = payload.response_text
     feedback_classes = set()
-    synced_log_count = 0
     task = resolve_task_description(resolved_playground)
     available_blocks = resolve_available_blocks(resolved_playground)
     raw_logs = "None"
@@ -169,7 +146,7 @@ def create_response(
     if task and payload.student_message:
         try:
             if resolved_session_id is None:
-                resolved_session_id, synced_log_count = resolve_session_id_with_sync(student_id)
+                resolved_session_id = resolve_session_id_for_student(student_id)
             else:
                 remember_latest_session(student_id, resolved_session_id)
             events = fetch_events_from_db(
@@ -183,7 +160,6 @@ def create_response(
                     "Wrong Playground Detected",
                     student_id=student_id,
                     session_id=resolved_session_id,
-                    synced_log_count=synced_log_count,
                     current_playground=current_playground,
                     expected_playground=DEFAULT_PLAYGROUND,
                     message=response_text,
@@ -194,7 +170,6 @@ def create_response(
                     "Active Run Detected",
                     student_id=student_id,
                     session_id=resolved_session_id,
-                    synced_log_count=synced_log_count,
                     message=response_text,
                 )
             else:
@@ -213,7 +188,6 @@ def create_response(
                 "Current State Analyzer Output",
                 student_id=student_id,
                 session_id=resolved_session_id,
-                synced_log_count=synced_log_count,
                 snapshot=snapshot.to_dict(),
             )
             feedback_classes = determine_feedback_class(snapshot)
@@ -232,7 +206,6 @@ def create_response(
                 "Feedback Policy Output",
                 student_id=student_id,
                 session_id=resolved_session_id,
-                synced_log_count=synced_log_count,
                 feedback_classes=sorted(
                     feedback_class.value for feedback_class in feedback_classes
                 ),

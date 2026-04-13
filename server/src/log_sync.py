@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+from threading import Lock
 
 try:
     from src.fetch_invite_hub_logs import (
@@ -33,28 +35,39 @@ except ModuleNotFoundError:
     from server.src.parse_event_logs import insert_rows, parse_records
 
 
-def sync_invite_hub_logs(*, student_id: str | None = None) -> int:
-    load_local_env()
-    base_url = os.getenv("INVITE_HUB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    token = get_auth_token(base_url)
-    state_path = Path(DEFAULT_STATE_PATH)
-    state = read_sync_state(state_path)
-    last_source_log_id = state.get("last_source_log_id")
-    if last_source_log_id is not None and not isinstance(last_source_log_id, int):
-        raise RuntimeError("Sync state last_source_log_id must be an integer.")
+logger = logging.getLogger(__name__)
+_sync_lock = Lock()
 
-    raw_records = fetch_vex_logs_incremental(
-        base_url,
-        token,
-        build_query_string(student_id=student_id),
-        page_size=DEFAULT_PAGE_SIZE,
-        last_source_log_id=last_source_log_id,
-    )
-    if not raw_records:
+
+def sync_invite_hub_logs() -> int:
+    if not _sync_lock.acquire(blocking=False):
+        logger.info("Invite Hub sync skipped because another sync is already running.")
         return 0
 
-    parsed_rows = parse_records(raw_records, "invite_hub_incremental")
-    insert_rows(parsed_rows)
-    newest_source_log_id = max(parse_source_log_id(record) for record in raw_records)
-    write_sync_state(state_path, newest_source_log_id)
-    return len(raw_records)
+    try:
+        load_local_env()
+        base_url = os.getenv("INVITE_HUB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+        token = get_auth_token(base_url)
+        state_path = Path(DEFAULT_STATE_PATH)
+        state = read_sync_state(state_path)
+        last_source_log_id = state.get("last_source_log_id")
+        if last_source_log_id is not None and not isinstance(last_source_log_id, int):
+            raise RuntimeError("Sync state last_source_log_id must be an integer.")
+
+        raw_records = fetch_vex_logs_incremental(
+            base_url,
+            token,
+            build_query_string(),
+            page_size=DEFAULT_PAGE_SIZE,
+            last_source_log_id=last_source_log_id,
+        )
+        if not raw_records:
+            return 0
+
+        parsed_rows = parse_records(raw_records, "invite_hub_incremental")
+        insert_rows(parsed_rows)
+        newest_source_log_id = max(parse_source_log_id(record) for record in raw_records)
+        write_sync_state(state_path, newest_source_log_id)
+        return len(raw_records)
+    finally:
+        _sync_lock.release()

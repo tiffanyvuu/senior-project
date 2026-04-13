@@ -26,6 +26,8 @@ Copy [.env.example](/Users/tiffanyvuu/Documents/College/Semester8/CIS4914/senior
 - `INVITE_HUB_BASE_URL`
 - `INVITE_HUB_USERNAME`
 - `INVITE_HUB_PASSWORD`
+- `INVITE_HUB_BACKGROUND_SYNC_ENABLED`
+- `INVITE_HUB_BACKGROUND_SYNC_INTERVAL_S`
 
 Example:
 
@@ -38,6 +40,8 @@ BACKEND_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 INVITE_HUB_BASE_URL=https://inviteinstitutehub.org
 INVITE_HUB_USERNAME=YOUR_USERNAME
 INVITE_HUB_PASSWORD=YOUR_PASSWORD
+INVITE_HUB_BACKGROUND_SYNC_ENABLED=true
+INVITE_HUB_BACKGROUND_SYNC_INTERVAL_S=5
 ```
 
 ## Running Client and Server
@@ -80,6 +84,10 @@ Store your Invite Hub credentials in the repo root `.env`:
 - `INVITE_HUB_BASE_URL=https://inviteinstitutehub.org`
 - `INVITE_HUB_USERNAME=YOUR_USERNAME`
 - `INVITE_HUB_PASSWORD=YOUR_PASSWORD`
+- `INVITE_HUB_BACKGROUND_SYNC_ENABLED=true`
+- `INVITE_HUB_BACKGROUND_SYNC_INTERVAL_S=5`
+
+When the backend starts, it now polls Invite Hub in the background and incrementally inserts new logs into Postgres. Help requests no longer wait for a fresh Invite Hub fetch on the request path. If a student has just run their project for the first time, give the background sync a few seconds to ingest the new session before asking for help.
 
 Then fetch the latest VEX logs and save them locally:
 
