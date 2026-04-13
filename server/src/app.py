@@ -1,7 +1,7 @@
-import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from threading import Event, Thread
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
+BACKGROUND_SYNC_JOIN_TIMEOUT_S = 1.0
+
+
 def get_allowed_origins() -> list[str]:
     configured_origins = os.getenv("BACKEND_CORS_ORIGINS", "")
     if configured_origins.strip():
@@ -38,12 +41,12 @@ def get_allowed_origins() -> list[str]:
     ]
 
 
-async def run_invite_hub_sync_loop(stop_event: asyncio.Event) -> None:
+def run_invite_hub_sync_loop(stop_event: Event) -> None:
     interval_s = get_invite_hub_background_sync_interval_s()
     logger.info("Invite Hub background sync started with interval=%ss.", interval_s)
     while not stop_event.is_set():
         try:
-            synced_count = await asyncio.to_thread(sync_invite_hub_logs)
+            synced_count = sync_invite_hub_logs()
             if synced_count:
                 logger.info(
                     "Invite Hub background sync fetched %s new records.",
@@ -52,24 +55,25 @@ async def run_invite_hub_sync_loop(stop_event: asyncio.Event) -> None:
         except Exception:
             logger.exception("Invite Hub background sync failed.")
 
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
-        except asyncio.TimeoutError:
-            continue
+        if stop_event.wait(timeout=interval_s):
+            break
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    stop_event: asyncio.Event | None = None
-    sync_task: asyncio.Task[None] | None = None
+    stop_event: Event | None = None
+    sync_thread: Thread | None = None
 
     if get_invite_hub_background_sync_enabled():
         if is_invite_hub_sync_configured():
-            stop_event = asyncio.Event()
-            sync_task = asyncio.create_task(
-                run_invite_hub_sync_loop(stop_event),
+            stop_event = Event()
+            sync_thread = Thread(
+                target=run_invite_hub_sync_loop,
+                args=(stop_event,),
                 name="invite-hub-background-sync",
+                daemon=True,
             )
+            sync_thread.start()
         else:
             logger.info(
                 "Invite Hub background sync is enabled but no Invite Hub credentials were found."
@@ -80,9 +84,13 @@ async def lifespan(_: FastAPI):
     try:
         yield
     finally:
-        if stop_event is not None and sync_task is not None:
+        if stop_event is not None and sync_thread is not None:
             stop_event.set()
-            await sync_task
+            sync_thread.join(timeout=BACKGROUND_SYNC_JOIN_TIMEOUT_S)
+            if sync_thread.is_alive():
+                logger.info(
+                    "Invite Hub background sync was still in-flight during shutdown; exiting without waiting for it."
+                )
 
 
 app = FastAPI(title="Pedagogical AI Agent API", lifespan=lifespan)
