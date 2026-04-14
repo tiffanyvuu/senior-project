@@ -279,7 +279,7 @@ button {
 .message-row {
   display: flex;
   width: 100%;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 0.75rem;
 }
 
@@ -321,6 +321,7 @@ button {
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
+  align-self: flex-end;
   border-radius: 14px;
   display: inline-flex;
   align-items: center;
@@ -553,7 +554,7 @@ button {
 .composer {
   margin: 0 1rem 1rem;
   padding: 0.95rem;
-  border-radius: 6px;
+  border-radius: 18px;
   background: rgba(237, 245, 251, 0.82);
   border: 1px solid rgba(109, 155, 197, 0.38);
 }
@@ -575,7 +576,7 @@ button {
   width: 100%;
   min-height: 92px;
   resize: vertical;
-  border-radius: 4px;
+  border-radius: 18px;
   border: 1px solid rgba(120, 164, 204, 0.45);
   background: rgba(255, 255, 255, 0.94);
   color: #23364a;

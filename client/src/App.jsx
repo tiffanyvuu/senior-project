@@ -118,6 +118,32 @@ function createPendingAssistantMessage() {
   };
 }
 
+function buildAssistantErrorMessage(errorMessage, fallbackBody) {
+  if (typeof errorMessage !== "string" || !errorMessage.trim()) {
+    return {
+      body: fallbackBody,
+      meta: "Could not respond",
+    };
+  }
+
+  if (
+    errorMessage.includes("Open GO-Mars")
+    || errorMessage.includes("Switch to GO-Mars")
+    || errorMessage.includes("Run your project once")
+    || errorMessage.includes("Please stop your current run")
+  ) {
+    return {
+      body: errorMessage,
+      meta: "Guide Bot",
+    };
+  }
+
+  return {
+    body: fallbackBody,
+    meta: `Could not respond: ${errorMessage}`,
+  };
+}
+
 function MessageAvatar({ role }) {
   if (role === "student") {
     return (
@@ -572,6 +598,7 @@ function App() {
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
         session_id: messageResponse.session_id,
+        session_locked: Boolean(sessionIdDraft.trim()),
         student_message: trimmedDraft,
       });
       setSessionId(responseRecord.session_id);
@@ -597,18 +624,22 @@ function App() {
         ],
       );
     } catch (error) {
+      const assistantError = buildAssistantErrorMessage(
+        error.message,
+        "The agent ran into a delay. Try asking again in a moment.",
+      );
       setMessages((current) =>
         current.map((message) =>
           message.id === optimisticMessage.id
             ? {
                 ...message,
-                meta: `Failed to send: ${error.message}`,
+                meta: "Sent",
               }
             : message.id === pendingAssistantMessage.id
               ? {
                   ...message,
-                  body: "The agent ran into a delay. Try asking again in a moment.",
-                  meta: `Failed: ${error.message}`,
+                  body: assistantError.body,
+                  meta: assistantError.meta,
                   isLoading: false,
                 }
             : message,
@@ -642,6 +673,7 @@ function App() {
       const responseRecord = await postJson(`/students/${studentId}/responses`, {
         message_id: messageResponse.message_id,
         session_id: messageResponse.session_id,
+        session_locked: Boolean(sessionIdDraft.trim()),
         student_message: "Help",
       });
       setSessionId(responseRecord.session_id);
@@ -667,18 +699,22 @@ function App() {
         ],
       );
     } catch (error) {
+      const assistantError = buildAssistantErrorMessage(
+        error.message,
+        "Help could not be sent right now.",
+      );
       setMessages((current) =>
         current.map((message) =>
           message.id === helpMessage.id
             ? {
                 ...message,
-                meta: `Failed to send: ${error.message}`,
+                meta: "Sent",
               }
             : message.id === pendingAssistantMessage.id
               ? {
                   ...message,
-                  body: "Help could not be sent right now.",
-                  meta: `Failed to send: ${error.message}`,
+                  body: assistantError.body,
+                  meta: assistantError.meta,
                   isLoading: false,
                 }
               : message,
