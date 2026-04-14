@@ -200,6 +200,7 @@ function App() {
   const [sessionIdDraft, setSessionIdDraft] = useState("");
   const [studentId, setStudentId] = useState("");
   const [sessionId, setSessionId] = useState("Detecting latest session");
+  const [startError, setStartError] = useState("");
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState(starterMessages);
   const [pendingAction, setPendingAction] = useState("");
@@ -428,6 +429,17 @@ function App() {
     return data;
   };
 
+  const getJson = async (path) => {
+    const response = await fetch(`${apiBase}${path}`);
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.detail || `Request failed with status ${response.status}`);
+    }
+
+    return data;
+  };
+
   const updateMessage = (messageId, updater) => {
     setMessages((current) =>
       current.map((message) =>
@@ -502,15 +514,31 @@ function App() {
     }
   };
 
-  const handleStudentStart = (event) => {
+  const handleStudentStart = async (event) => {
     event.preventDefault();
     const trimmedStudentId = studentIdDraft.trim();
     const trimmedSessionId = sessionIdDraft.trim();
     if (!trimmedStudentId) {
       return;
     }
-    setStudentId(trimmedStudentId);
-    setSessionId(trimmedSessionId || "Detecting latest session");
+    setStartError("");
+    setPendingAction("session");
+
+    try {
+      let resolvedSessionId = trimmedSessionId;
+
+      if (!resolvedSessionId) {
+        const sessionRecord = await getJson(`/students/${trimmedStudentId}/session`);
+        resolvedSessionId = sessionRecord.session_id;
+      }
+
+      setStudentId(trimmedStudentId);
+      setSessionId(resolvedSessionId);
+    } catch (error) {
+      setStartError(error.message);
+    } finally {
+      setPendingAction("");
+    }
   };
 
   const handleComposerKeyDown = (event) => {
@@ -763,6 +791,7 @@ function App() {
                     onChange={(event) => setStudentIdDraft(event.target.value)}
                     placeholder="Student ID"
                     autoComplete="off"
+                    disabled={pendingAction === "session"}
                   />
                   <label className="sr-only" htmlFor="session-id">
                     Session ID
@@ -774,9 +803,13 @@ function App() {
                     onChange={(event) => setSessionIdDraft(event.target.value)}
                     placeholder="Session ID (optional)"
                     autoComplete="off"
+                    disabled={pendingAction === "session"}
                   />
-                  <button type="submit">Start Chat</button>
+                  <button type="submit" disabled={pendingAction === "session"}>
+                    {pendingAction === "session" ? "Loading..." : "Start Chat"}
+                  </button>
                 </form>
+                {startError ? <p className="start-error">{startError}</p> : null}
               </section>
             </div>
           ) : (
