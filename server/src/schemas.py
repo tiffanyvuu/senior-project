@@ -25,6 +25,13 @@ class MessageResponse(BaseModel):
     status: Literal["received"]
 
 
+class SessionResolutionResponse(BaseModel):
+    session_id: str
+    student_id: str
+    playground: str
+    status: Literal["resolved"]
+
+
 class StudentResponseRequest(BaseModel):
     message_id: str | None = Field(
         default=None,

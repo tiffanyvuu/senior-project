@@ -26,6 +26,7 @@ from src.schemas import (
     FeedbackResponse,
     MessageRequest,
     MessageResponse,
+    SessionResolutionResponse,
     StudentResponseRequest,
     StudentResponseResponse,
 )
@@ -104,6 +105,31 @@ def resolve_session_id_with_sync(student_id: str) -> tuple[str, int]:
             raise
     synced_log_count = maybe_sync_invite_hub_logs(student_id)
     return resolve_session_id_for_student(student_id), synced_log_count
+
+
+@router.get("/students/{student_id}/session", response_model=SessionResolutionResponse)
+def resolve_session(student_id: str) -> SessionResolutionResponse:
+    resolved_session_id, synced_log_count = resolve_session_id_with_sync(student_id)
+    current_playground = DEFAULT_PLAYGROUND
+
+    events = fetch_events_from_db(student_id=student_id, session_id=resolved_session_id)
+    if events:
+        current_playground, _ = select_current_playground_segment(events)
+
+    log_stage(
+        "Session Resolved",
+        student_id=student_id,
+        session_id=resolved_session_id,
+        synced_log_count=synced_log_count,
+        playground=current_playground,
+    )
+
+    return SessionResolutionResponse(
+        session_id=resolved_session_id,
+        student_id=student_id,
+        playground=current_playground,
+        status="resolved",
+    )
 
 @router.post("/students/{student_id}/messages", response_model=MessageResponse)
 def create_message(student_id: str, payload: MessageRequest) -> MessageResponse:
